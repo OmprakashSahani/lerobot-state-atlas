@@ -157,11 +157,14 @@ def visualize_workspace(
         readable=True,
         resolve_path=True,
     ),
-    episode: int = typer.Option(
-        0,
+    episode: list[int] = typer.Option(
+        [0],
         "--episode",
         "-e",
-        help="Episode index to visualize.",
+        help=(
+            "Episode index to visualize. Repeat this option "
+            "to combine multiple episodes."
+        ),
     ),
     voxel_size: float = typer.Option(
         0.02,
@@ -177,8 +180,14 @@ def visualize_workspace(
 ) -> None:
     """Generate a dual-arm tool workspace PNG."""
     try:
-        if episode < 0:
+        if not episode:
+            raise ValueError("At least one episode must be selected.")
+
+        if any(index < 0 for index in episode):
             raise ValueError("Episode index must be nonnegative.")
+
+        if len(set(episode)) != len(episode):
+            raise ValueError("Episode indices must be unique.")
 
         if not isfinite(voxel_size) or voxel_size <= 0.0:
             raise ValueError("Voxel size must be finite and greater than zero.")
@@ -187,10 +196,13 @@ def visualize_workspace(
         summary = load_dataset_summary(repo_id)
         component_names = _state_component_names(summary)
 
-        console.print(f"Loading episode [bold]{episode}[/bold]...")
+        episode_text = ", ".join(str(index) for index in episode)
+        episode_label = "episode" if len(episode) == 1 else "episodes"
+
+        console.print(f"Loading {episode_label} [bold]{episode_text}[/bold]...")
         batch = load_state_batch(
             repo_id,
-            episodes=[episode],
+            episodes=episode,
         )
 
         console.print(f"Loading robot model from [bold]{urdf_path}[/bold]...")
@@ -203,6 +215,7 @@ def visualize_workspace(
                 model,
                 build_trlc_dk1_joint_component_map(arm),
                 arm=arm,
+                episode_indices=batch.episode_indices,
             )
             for arm in ("left", "right")
         )
@@ -219,7 +232,11 @@ def visualize_workspace(
             trajectories,
             output_path,
             coverages=coverages,
-            title=(f"TRLC-DK1 Episode {episode} Tool Workspace"),
+            title=(
+                f"TRLC-DK1 Episode {episode_text} Tool Workspace"
+                if len(episode) == 1
+                else (f"TRLC-DK1 Episodes {episode_text} Tool Workspace")
+            ),
         )
     except Exception as error:
         console.print(f"[red]Failed to visualize workspace:[/red] {error}")

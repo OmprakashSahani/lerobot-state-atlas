@@ -148,7 +148,13 @@ def test_visualize_workspace_command(
         (3, 14),
         dtype=torch.float32,
     )
-    batch = SimpleNamespace(states=states)
+    batch = SimpleNamespace(
+        states=states,
+        episode_indices=torch.tensor(
+            [3, 3, 3],
+            dtype=torch.int64,
+        ),
+    )
     model = object()
     calls: dict[str, object] = {}
 
@@ -177,12 +183,17 @@ def test_visualize_workspace_command(
         joint_component_map: dict[str, str],
         *,
         arm: str,
+        episode_indices: torch.Tensor,
     ) -> ToolTrajectory:
         calls[f"{arm}_components"] = component_names
         calls[f"{arm}_mapping"] = joint_component_map
 
         assert state_values is states
         assert robot_model is model
+        assert torch.equal(
+            episode_indices,
+            batch.episode_indices,
+        )
 
         offset = 0.0 if arm == "left" else 1.0
         return ToolTrajectory(
@@ -431,3 +442,176 @@ def test_visualize_workspace_reports_pipeline_error(
     assert result.exit_code == 1
     assert "Failed to visualize workspace" in result.stdout
     assert "Episode download failed" in result.stdout
+
+
+def test_visualize_workspace_accepts_multiple_episodes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text(
+        "<robot name='test'/>",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "multi-episode-workspace.png"
+
+    summary = make_summary()
+    states = torch.zeros(
+        (4, 14),
+        dtype=torch.float32,
+    )
+    episode_indices = torch.tensor(
+        [2, 2, 5, 5],
+        dtype=torch.int64,
+    )
+    batch = SimpleNamespace(
+        states=states,
+        episode_indices=episode_indices,
+    )
+    model = object()
+    calls: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.load_dataset_summary",
+        lambda repo_id: summary,
+    )
+
+    def fake_load_batch(
+        repo_id: str,
+        episodes: list[int],
+    ) -> SimpleNamespace:
+        calls["episodes"] = episodes
+        return batch
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.load_state_batch",
+        fake_load_batch,
+    )
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.load_robot_model",
+        lambda path: model,
+    )
+
+    def fake_compute_trajectory(
+        state_values: torch.Tensor,
+        component_names: tuple[str, ...],
+        robot_model: object,
+        joint_component_map: dict[str, str],
+        *,
+        arm: str,
+        episode_indices: torch.Tensor,
+    ) -> ToolTrajectory:
+        assert state_values is states
+        assert robot_model is model
+        assert torch.equal(
+            episode_indices,
+            batch.episode_indices,
+        )
+
+        offset = 0.0 if arm == "left" else 1.0
+
+        return ToolTrajectory(
+            arm=arm,
+            link_name="tool0",
+            positions=torch.tensor(
+                [
+                    [offset, 0.0, 0.0],
+                    [offset, 0.1, 0.1],
+                    [offset, 0.2, 0.2],
+                    [offset, 0.3, 0.3],
+                ],
+                dtype=torch.float64,
+            ),
+            episode_indices=episode_indices,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.compute_tool_trajectory",
+        fake_compute_trajectory,
+    )
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.compute_workspace_coverage",
+        lambda trajectory, *, voxel_size: SimpleNamespace(
+            arm=trajectory.arm,
+            voxel_size=voxel_size,
+        ),
+    )
+
+    def fake_save_plot(
+        trajectories: tuple[ToolTrajectory, ...],
+        destination: Path,
+        *,
+        coverages: tuple[SimpleNamespace, ...],
+        title: str,
+    ) -> WorkspacePlot:
+        calls["title"] = title
+
+        assert all(trajectory.num_episodes == 2 for trajectory in trajectories)
+
+        return WorkspacePlot(
+            output_path=destination,
+            num_trajectories=2,
+            num_points=8,
+            voxel_size=0.02,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.save_workspace_plot",
+        fake_save_plot,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "visualize-workspace",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--episode",
+            "2",
+            "--episode",
+            "5",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls["episodes"] == [2, 5]
+    assert calls["title"] == ("TRLC-DK1 Episodes 2, 5 Tool Workspace")
+    assert "Plotted 8 points" in result.stdout
+
+
+def test_visualize_workspace_rejects_duplicate_episodes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.touch()
+
+    def unexpected_load(
+        repo_id: str,
+    ) -> DatasetSummary:
+        raise AssertionError(f"Unexpected metadata load: {repo_id}")
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.load_dataset_summary",
+        unexpected_load,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "visualize-workspace",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--episode",
+            "3",
+            "--episode",
+            "3",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Episode indices must be unique" in result.stdout
