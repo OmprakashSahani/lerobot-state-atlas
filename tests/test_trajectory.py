@@ -291,3 +291,97 @@ def test_compute_tool_trajectory_rejects_invalid_chunk_size() -> None:
             arm="left",
             chunk_size=0,
         )
+
+
+def test_compute_tool_trajectory_preserves_episode_indices() -> None:
+    states = torch.tensor(
+        [
+            [0.0],
+            [math.pi / 2.0],
+            [math.pi],
+        ],
+        dtype=torch.float32,
+    )
+    episode_indices = torch.tensor(
+        [7, 7, 3],
+        dtype=torch.int64,
+    )
+
+    trajectory = compute_tool_trajectory(
+        states,
+        component_names=("left_joint_1.pos",),
+        model=make_model(),
+        joint_component_map={
+            "joint1": "left_joint_1.pos",
+        },
+        arm="left",
+        episode_indices=episode_indices,
+    )
+
+    assert trajectory.num_frames == 3
+    assert trajectory.num_episodes == 2
+    assert torch.equal(
+        trajectory.episode_indices,
+        episode_indices,
+    )
+
+
+def test_compute_tool_trajectory_rejects_non_vector_episode_indices() -> None:
+    with pytest.raises(
+        ValueError,
+        match="Episode indices must be one-dimensional",
+    ):
+        compute_tool_trajectory(
+            torch.tensor([[0.0], [1.0]]),
+            component_names=("left_joint_1.pos",),
+            model=make_model(),
+            joint_component_map={
+                "joint1": "left_joint_1.pos",
+            },
+            arm="left",
+            episode_indices=torch.tensor([[1], [1]]),
+        )
+
+
+def test_compute_tool_trajectory_rejects_episode_index_count() -> None:
+    with pytest.raises(
+        ValueError,
+        match="must match the number of state frames",
+    ):
+        compute_tool_trajectory(
+            torch.tensor([[0.0], [1.0]]),
+            component_names=("left_joint_1.pos",),
+            model=make_model(),
+            joint_component_map={
+                "joint1": "left_joint_1.pos",
+            },
+            arm="left",
+            episode_indices=torch.tensor([1]),
+        )
+
+
+@pytest.mark.parametrize(
+    "episode_indices",
+    (
+        torch.tensor([1.0, 1.0]),
+        torch.tensor([True, False]),
+        torch.tensor([1.0 + 0.0j, 2.0 + 0.0j]),
+    ),
+)
+def test_compute_tool_trajectory_rejects_noninteger_episode_indices(
+    episode_indices: torch.Tensor,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="must use an integer dtype",
+    ):
+        compute_tool_trajectory(
+            torch.tensor([[0.0], [1.0]]),
+            component_names=("left_joint_1.pos",),
+            model=make_model(),
+            joint_component_map={
+                "joint1": "left_joint_1.pos",
+            },
+            arm="left",
+            episode_indices=episode_indices,
+        )
