@@ -574,3 +574,51 @@ def test_plot_uses_episode_marker_labels_and_neutral_voxels() -> None:
 
     assert voxel_color[0] == pytest.approx(voxel_color[1])
     assert voxel_color[1] == pytest.approx(voxel_color[2])
+
+
+def test_plot_reuses_color_for_repeated_episode_segments() -> None:
+    from matplotlib.figure import Figure
+
+    from lerobot_state_atlas.visualization import (
+        _plot_trajectory,
+    )
+
+    trajectory = ToolTrajectory(
+        arm="left",
+        link_name="tool0",
+        positions=torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.1, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [2.1, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        episode_indices=torch.tensor(
+            [7, 7, 3, 3, 7, 7],
+            dtype=torch.int64,
+        ),
+    )
+
+    figure = Figure()
+    axis = figure.add_subplot(
+        1,
+        1,
+        1,
+        projection="3d",
+    )
+
+    _plot_trajectory(
+        axis,
+        trajectory,
+        trajectory.positions,
+        coverage=None,
+    )
+
+    colors = [line.get_color() for line in axis.lines]
+
+    assert colors[0] == colors[2]
+    assert colors[0] != colors[1]

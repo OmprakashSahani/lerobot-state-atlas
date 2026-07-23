@@ -152,7 +152,7 @@ def _plot_trajectory(
         trajectory,
         positions,
     )
-    seen_episode_labels: set[int] = set()
+    episode_colors: dict[int, object] = {}
     start_label = "Episode start" if trajectory.episode_indices is not None else "Start"
     end_label = "Episode end" if trajectory.episode_indices is not None else "End"
 
@@ -161,20 +161,35 @@ def _plot_trajectory(
 
         if episode is None:
             path_label = "Tool path"
-        elif episode in seen_episode_labels:
-            path_label = "_nolegend_"
+            line = axis.plot(
+                group_values[:, 0],
+                group_values[:, 1],
+                group_values[:, 2],
+                linewidth=1.4,
+                alpha=0.9,
+                label=path_label,
+            )[0]
+        elif episode in episode_colors:
+            line = axis.plot(
+                group_values[:, 0],
+                group_values[:, 1],
+                group_values[:, 2],
+                linewidth=1.4,
+                alpha=0.9,
+                color=episode_colors[episode],
+                label="_nolegend_",
+            )[0]
         else:
-            path_label = f"Episode {episode}"
-            seen_episode_labels.add(episode)
+            line = axis.plot(
+                group_values[:, 0],
+                group_values[:, 1],
+                group_values[:, 2],
+                linewidth=1.4,
+                alpha=0.9,
+                label=f"Episode {episode}",
+            )[0]
+            episode_colors[episode] = line.get_color()
 
-        line = axis.plot(
-            group_values[:, 0],
-            group_values[:, 1],
-            group_values[:, 2],
-            linewidth=1.4,
-            alpha=0.9,
-            label=path_label,
-        )[0]
         path_color = line.get_color()
 
         axis.scatter(
