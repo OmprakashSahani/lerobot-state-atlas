@@ -3,7 +3,12 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from lerobot_state_atlas.state import build_state_batch, load_state_batch
+from lerobot_state_atlas.state import (
+    StateBatch,
+    build_state_batch,
+    load_state_batch,
+    split_state_batch_by_episode,
+)
 
 
 class FakeTabularDataset:
@@ -75,3 +80,80 @@ def test_load_state_batch_requires_an_episode() -> None:
         match="At least one episode must be selected",
     ):
         load_state_batch("organization/dataset", [])
+
+
+def test_split_state_batch_by_episode() -> None:
+    batch = StateBatch(
+        timestamps=torch.tensor(
+            [0.0, 0.02, 0.0, 0.02],
+            dtype=torch.float32,
+        ),
+        frame_indices=torch.tensor(
+            [0, 1, 0, 1],
+            dtype=torch.int64,
+        ),
+        episode_indices=torch.tensor(
+            [7, 7, 3, 3],
+            dtype=torch.int64,
+        ),
+        states=torch.tensor(
+            [
+                [0.1, 0.2],
+                [0.3, 0.4],
+                [0.5, 0.6],
+                [0.7, 0.8],
+            ],
+            dtype=torch.float32,
+        ),
+        actions=torch.tensor(
+            [
+                [1.1],
+                [1.2],
+                [1.3],
+                [1.4],
+            ],
+            dtype=torch.float32,
+        ),
+    )
+
+    episode_batches = split_state_batch_by_episode(batch)
+
+    assert tuple(episode_batches) == (7, 3)
+
+    episode_7 = episode_batches[7]
+    assert episode_7.num_frames == 2
+    assert torch.equal(
+        episode_7.frame_indices,
+        torch.tensor([0, 1], dtype=torch.int64),
+    )
+    assert torch.equal(
+        episode_7.episode_indices,
+        torch.tensor([7, 7], dtype=torch.int64),
+    )
+    assert torch.equal(
+        episode_7.states,
+        torch.tensor(
+            [
+                [0.1, 0.2],
+                [0.3, 0.4],
+            ],
+            dtype=torch.float32,
+        ),
+    )
+
+    episode_3 = episode_batches[3]
+    assert episode_3.num_frames == 2
+    assert torch.equal(
+        episode_3.episode_indices,
+        torch.tensor([3, 3], dtype=torch.int64),
+    )
+    assert torch.equal(
+        episode_3.actions,
+        torch.tensor(
+            [
+                [1.3],
+                [1.4],
+            ],
+            dtype=torch.float32,
+        ),
+    )
