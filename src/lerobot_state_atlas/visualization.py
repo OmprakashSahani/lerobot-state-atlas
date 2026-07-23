@@ -86,6 +86,59 @@ def _set_equal_axes(
     )
 
 
+def _episode_position_groups(
+    trajectory: ToolTrajectory,
+    positions: Tensor,
+) -> tuple[Tensor, ...]:
+    """Group trajectory positions by episode in first-seen order."""
+    episode_indices = trajectory.episode_indices
+
+    if episode_indices is None:
+        return (positions,)
+
+    if episode_indices.ndim != 1:
+        raise ValueError("Trajectory episode indices must be one-dimensional.")
+
+    if episode_indices.shape[0] != positions.shape[0]:
+        raise ValueError(
+            "Trajectory episode index count must match the number of points."
+        )
+
+    if (
+        episode_indices.dtype == torch.bool
+        or episode_indices.is_floating_point()
+        or episode_indices.is_complex()
+    ):
+        raise ValueError("Trajectory episode indices must use an integer dtype.")
+
+    normalized_indices = episode_indices.detach().to(
+        device="cpu",
+        dtype=torch.int64,
+    )
+
+    transition_indices = (
+        torch.nonzero(
+            normalized_indices[1:] != normalized_indices[:-1],
+            as_tuple=False,
+        ).flatten()
+        + 1
+    )
+    boundaries = (
+        0,
+        *(int(index) for index in transition_indices.tolist()),
+        positions.shape[0],
+    )
+
+    return tuple(
+        positions[start:stop]
+        for start, stop in zip(
+            boundaries[:-1],
+            boundaries[1:],
+            strict=True,
+        )
+    )
+
+
 def _plot_trajectory(
     axis: Axes,
     trajectory: ToolTrajectory,
@@ -94,15 +147,21 @@ def _plot_trajectory(
 ) -> None:
     values = positions.numpy()
     axis_positions = positions
-
-    axis.plot(
-        values[:, 0],
-        values[:, 1],
-        values[:, 2],
-        linewidth=1.4,
-        alpha=0.9,
-        label="Tool path",
+    position_groups = _episode_position_groups(
+        trajectory,
+        positions,
     )
+
+    for index, group in enumerate(position_groups):
+        group_values = group.numpy()
+        axis.plot(
+            group_values[:, 0],
+            group_values[:, 1],
+            group_values[:, 2],
+            linewidth=1.4,
+            alpha=0.9,
+            label="Tool path" if index == 0 else "_nolegend_",
+        )
 
     axis.scatter(
         values[0, 0],
