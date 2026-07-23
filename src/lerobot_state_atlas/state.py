@@ -57,52 +57,6 @@ def build_state_batch(dataset: Any) -> StateBatch:
     )
 
 
-def split_state_batch_by_episode(
-    batch: StateBatch,
-) -> dict[int, StateBatch]:
-    """Split a state batch while preserving first-seen episode order."""
-    if batch.episode_indices.ndim != 1:
-        raise ValueError("Episode indices must be one-dimensional.")
-
-    num_frames = batch.num_frames
-    frame_tensors = (
-        batch.timestamps,
-        batch.frame_indices,
-        batch.episode_indices,
-        batch.states,
-        batch.actions,
-    )
-
-    if any(tensor.shape[0] != num_frames for tensor in frame_tensors):
-        raise ValueError(
-            "All state-batch tensors must contain the same number of frames."
-        )
-
-    episode_order: list[int] = []
-    seen_episodes: set[int] = set()
-
-    for value in batch.episode_indices.detach().cpu().tolist():
-        episode = int(value)
-
-        if episode not in seen_episodes:
-            seen_episodes.add(episode)
-            episode_order.append(episode)
-
-    episode_batches: dict[int, StateBatch] = {}
-
-    for episode in episode_order:
-        mask = batch.episode_indices == episode
-        episode_batches[episode] = StateBatch(
-            timestamps=batch.timestamps[mask],
-            frame_indices=batch.frame_indices[mask],
-            episode_indices=batch.episode_indices[mask],
-            states=batch.states[mask],
-            actions=batch.actions[mask],
-        )
-
-    return episode_batches
-
-
 def load_state_batch(
     repo_id: str,
     episodes: Sequence[int],
