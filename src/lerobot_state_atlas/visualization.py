@@ -93,6 +93,7 @@ def _plot_trajectory(
     coverage: WorkspaceCoverage | None,
 ) -> None:
     values = positions.numpy()
+    axis_positions = positions
 
     axis.plot(
         values[:, 0],
@@ -125,9 +126,20 @@ def _plot_trajectory(
             coverage.minimum_xyz,
             dtype=torch.float64,
         )
-        voxel_centers = (
-            coverage.voxel_indices.to(dtype=torch.float64) + 0.5
-        ) * coverage.voxel_size + minimums
+        voxel_minimums = (
+            coverage.voxel_indices.to(dtype=torch.float64) * coverage.voxel_size
+            + minimums
+        )
+        voxel_maximums = voxel_minimums + coverage.voxel_size
+        voxel_centers = (voxel_minimums + voxel_maximums) / 2.0
+        axis_positions = torch.cat(
+            (
+                positions,
+                voxel_minimums,
+                voxel_maximums,
+            ),
+            dim=0,
+        )
 
         centers = voxel_centers.numpy()
         visit_counts = coverage.visit_counts.numpy()
@@ -162,7 +174,7 @@ def _plot_trajectory(
     axis.legend(loc="upper right")
     axis.view_init(elev=24, azim=-58)
     axis.set_box_aspect((1.0, 1.0, 1.0))
-    _set_equal_axes(axis, positions)
+    _set_equal_axes(axis, axis_positions)
 
 
 def save_workspace_plot(

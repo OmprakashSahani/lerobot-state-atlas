@@ -314,3 +314,44 @@ def test_save_workspace_plot_rejects_coverage_points(
             tmp_path / "workspace.png",
             coverages=(coverage,),
         )
+
+
+def test_plot_includes_full_voxel_extents() -> None:
+    from matplotlib.figure import Figure
+
+    from lerobot_state_atlas.visualization import (
+        _plot_trajectory,
+    )
+
+    trajectory = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        )
+    )
+    coverage = make_coverage(
+        trajectory,
+        voxel_size=1.0,
+    )
+
+    figure = Figure()
+    axis = figure.add_subplot(
+        1,
+        1,
+        1,
+        projection="3d",
+    )
+
+    _plot_trajectory(
+        axis,
+        trajectory,
+        trajectory.positions,
+        coverage,
+    )
+
+    assert axis.get_xlim() == pytest.approx((0.0, 1.0))
+    assert axis.get_ylim() == pytest.approx((0.0, 1.0))
+    assert axis.get_zlim() == pytest.approx((0.0, 1.0))
