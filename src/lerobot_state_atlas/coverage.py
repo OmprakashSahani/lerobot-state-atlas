@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from math import prod
+from math import isfinite, prod
 
 import torch
 from torch import Tensor
@@ -75,8 +75,8 @@ def compute_workspace_coverage(
     if num_points == 0:
         raise ValueError("Trajectory must contain at least one point.")
 
-    if voxel_size <= 0.0:
-        raise ValueError("Voxel size must be greater than zero.")
+    if not isfinite(voxel_size) or voxel_size <= 0.0:
+        raise ValueError("Voxel size must be finite and greater than zero.")
 
     if not trajectory.arm:
         raise ValueError("Trajectory arm must not be empty.")

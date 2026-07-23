@@ -155,13 +155,22 @@ def test_compute_workspace_coverage_rejects_empty() -> None:
         )
 
 
-@pytest.mark.parametrize("voxel_size", (0.0, -0.1))
+@pytest.mark.parametrize(
+    "voxel_size",
+    (
+        0.0,
+        -0.1,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ),
+)
 def test_compute_workspace_coverage_rejects_voxel_size(
     voxel_size: float,
 ) -> None:
     with pytest.raises(
         ValueError,
-        match="greater than zero",
+        match="finite and greater than zero",
     ):
         compute_workspace_coverage(
             make_trajectory(torch.tensor([[0.0, 0.0, 0.0]])),
