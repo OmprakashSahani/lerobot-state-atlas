@@ -80,8 +80,8 @@ def inspect_dataset(
 ) -> None:
     """Inspect LeRobot dataset metadata without loading video frames."""
     try:
-        with console.status(f"Loading metadata for [bold]{repo_id}[/bold]..."):
-            summary = load_dataset_summary(repo_id)
+        console.print(f"Loading metadata for [bold]{repo_id}[/bold]...")
+        summary = load_dataset_summary(repo_id)
     except Exception as error:
         console.print(f"[red]Failed to inspect dataset:[/red] {error}")
         raise typer.Exit(code=1) from error
