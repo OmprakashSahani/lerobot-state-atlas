@@ -6,7 +6,10 @@ authors = [
     { name = "Omprakash Sahani", email = "Omprakash.Sahani1206@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "rich>=15.0.0",
+    "typer>=0.27.0",
+]
 
 [project.scripts]
 lerobot-state-atlas = "lerobot_state_atlas:main"
@@ -14,3 +17,9 @@ lerobot-state-atlas = "lerobot_state_atlas:main"
 [build-system]
 requires = ["uv_build>=0.11.31,<0.12.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.22",
+]

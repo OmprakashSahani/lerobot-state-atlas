@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from lerobot-state-atlas!")
+from lerobot_state_atlas.cli import main
+
+__all__ = ["main"]
