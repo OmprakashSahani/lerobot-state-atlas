@@ -89,12 +89,12 @@ def _set_equal_axes(
 def _episode_position_groups(
     trajectory: ToolTrajectory,
     positions: Tensor,
-) -> tuple[Tensor, ...]:
-    """Group trajectory positions by episode in first-seen order."""
+) -> tuple[tuple[int | None, Tensor], ...]:
+    """Group positions into contiguous episode segments."""
     episode_indices = trajectory.episode_indices
 
     if episode_indices is None:
-        return (positions,)
+        return ((None, positions),)
 
     if episode_indices.ndim != 1:
         raise ValueError("Trajectory episode indices must be one-dimensional.")
@@ -115,7 +115,6 @@ def _episode_position_groups(
         device="cpu",
         dtype=torch.int64,
     )
-
     transition_indices = (
         torch.nonzero(
             normalized_indices[1:] != normalized_indices[:-1],
@@ -130,7 +129,10 @@ def _episode_position_groups(
     )
 
     return tuple(
-        positions[start:stop]
+        (
+            int(normalized_indices[start].item()),
+            positions[start:stop],
+        )
         for start, stop in zip(
             boundaries[:-1],
             boundaries[1:],
@@ -145,40 +147,52 @@ def _plot_trajectory(
     positions: Tensor,
     coverage: WorkspaceCoverage | None,
 ) -> None:
-    values = positions.numpy()
     axis_positions = positions
     position_groups = _episode_position_groups(
         trajectory,
         positions,
     )
+    seen_episode_labels: set[int] = set()
 
-    for index, group in enumerate(position_groups):
+    for index, (episode, group) in enumerate(position_groups):
         group_values = group.numpy()
-        axis.plot(
+
+        if episode is None:
+            path_label = "Tool path"
+        elif episode in seen_episode_labels:
+            path_label = "_nolegend_"
+        else:
+            path_label = f"Episode {episode}"
+            seen_episode_labels.add(episode)
+
+        line = axis.plot(
             group_values[:, 0],
             group_values[:, 1],
             group_values[:, 2],
             linewidth=1.4,
             alpha=0.9,
-            label="Tool path" if index == 0 else "_nolegend_",
-        )
+            label=path_label,
+        )[0]
+        path_color = line.get_color()
 
-    axis.scatter(
-        values[0, 0],
-        values[0, 1],
-        values[0, 2],
-        marker="o",
-        s=36,
-        label="Start",
-    )
-    axis.scatter(
-        values[-1, 0],
-        values[-1, 1],
-        values[-1, 2],
-        marker="X",
-        s=42,
-        label="End",
-    )
+        axis.scatter(
+            group_values[0, 0],
+            group_values[0, 1],
+            group_values[0, 2],
+            marker="o",
+            s=36,
+            color=path_color,
+            label="Start" if index == 0 else "_nolegend_",
+        )
+        axis.scatter(
+            group_values[-1, 0],
+            group_values[-1, 1],
+            group_values[-1, 2],
+            marker="X",
+            s=42,
+            color=path_color,
+            label="End" if index == 0 else "_nolegend_",
+        )
 
     if coverage is not None:
         minimums = torch.tensor(

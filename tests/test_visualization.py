@@ -462,3 +462,55 @@ def test_plot_splits_repeated_episode_segments() -> None:
     assert first_x == pytest.approx((0.0, 0.1))
     assert second_x == pytest.approx((1.0, 1.1))
     assert third_x == pytest.approx((2.0, 2.1))
+
+
+def test_plot_labels_and_marks_each_episode() -> None:
+    from matplotlib.figure import Figure
+
+    from lerobot_state_atlas.visualization import (
+        _plot_trajectory,
+    )
+
+    trajectory = ToolTrajectory(
+        arm="left",
+        link_name="tool0",
+        positions=torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.1, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        episode_indices=torch.tensor(
+            [7, 7, 3, 3],
+            dtype=torch.int64,
+        ),
+    )
+
+    figure = Figure()
+    axis = figure.add_subplot(
+        1,
+        1,
+        1,
+        projection="3d",
+    )
+
+    _plot_trajectory(
+        axis,
+        trajectory,
+        trajectory.positions,
+        coverage=None,
+    )
+
+    _, labels = axis.get_legend_handles_labels()
+
+    assert "Episode 7" in labels
+    assert "Episode 3" in labels
+    assert labels.count("Start") == 1
+    assert labels.count("End") == 1
+    assert "Tool path" not in labels
+
+    # One start and one end marker for each episode.
+    assert len(axis.collections) == 4
