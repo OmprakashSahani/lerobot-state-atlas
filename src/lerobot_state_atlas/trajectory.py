@@ -18,11 +18,20 @@ class ToolTrajectory:
     arm: str
     link_name: str
     positions: Tensor
+    episode_indices: Tensor | None = None
 
     @property
     def num_frames(self) -> int:
         """Return the number of trajectory frames."""
         return int(self.positions.shape[0])
+
+    @property
+    def num_episodes(self) -> int:
+        """Return the number of represented episodes."""
+        if self.episode_indices is None:
+            return 1
+
+        return int(torch.unique(self.episode_indices).numel())
 
 
 def build_trlc_dk1_joint_component_map(
@@ -253,6 +262,7 @@ def compute_tool_trajectory(
     arm: str,
     link_name: str = "tool0",
     chunk_size: int = _DEFAULT_CHUNK_SIZE,
+    episode_indices: Tensor | None = None,
 ) -> ToolTrajectory:
     """Convert batched joint states into three-dimensional tool positions."""
     if states.ndim != 2:
@@ -265,6 +275,33 @@ def compute_tool_trajectory(
 
     if chunk_size <= 0:
         raise ValueError("Chunk size must be greater than zero.")
+
+    normalized_episode_indices: Tensor | None = None
+
+    if episode_indices is not None:
+        if episode_indices.ndim != 1:
+            raise ValueError("Episode indices must be one-dimensional.")
+
+        if episode_indices.shape[0] != num_frames:
+            raise ValueError(
+                "Episode index count must match the number of state frames."
+            )
+
+        if (
+            episode_indices.dtype == torch.bool
+            or episode_indices.is_floating_point()
+            or episode_indices.is_complex()
+        ):
+            raise ValueError("Episode indices must use an integer dtype.")
+
+        normalized_episode_indices = (
+            episode_indices.detach()
+            .to(
+                device="cpu",
+                dtype=torch.int64,
+            )
+            .clone()
+        )
 
     names = tuple(component_names)
 
@@ -330,4 +367,5 @@ def compute_tool_trajectory(
         arm=arm,
         link_name=link_name,
         positions=torch.cat(position_chunks, dim=0),
+        episode_indices=normalized_episode_indices,
     )

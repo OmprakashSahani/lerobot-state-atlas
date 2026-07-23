@@ -3,7 +3,10 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from lerobot_state_atlas.state import build_state_batch, load_state_batch
+from lerobot_state_atlas.state import (
+    build_state_batch,
+    load_state_batch,
+)
 
 
 class FakeTabularDataset:
