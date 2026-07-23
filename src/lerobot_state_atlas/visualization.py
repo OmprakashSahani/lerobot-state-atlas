@@ -153,6 +153,8 @@ def _plot_trajectory(
         positions,
     )
     seen_episode_labels: set[int] = set()
+    start_label = "Episode start" if trajectory.episode_indices is not None else "Start"
+    end_label = "Episode end" if trajectory.episode_indices is not None else "End"
 
     for index, (episode, group) in enumerate(position_groups):
         group_values = group.numpy()
@@ -182,7 +184,7 @@ def _plot_trajectory(
             marker="o",
             s=36,
             color=path_color,
-            label="Start" if index == 0 else "_nolegend_",
+            label=start_label if index == 0 else "_nolegend_",
         )
         axis.scatter(
             group_values[-1, 0],
@@ -191,7 +193,7 @@ def _plot_trajectory(
             marker="X",
             s=42,
             color=path_color,
-            label="End" if index == 0 else "_nolegend_",
+            label=end_label if index == 0 else "_nolegend_",
         )
 
     if coverage is not None:
@@ -222,7 +224,8 @@ def _plot_trajectory(
             centers[:, 1],
             centers[:, 2],
             s=12 + 8 * visit_counts**0.5,
-            alpha=0.5,
+            color="0.4",
+            alpha=0.45,
             label="Occupied voxels",
         )
 

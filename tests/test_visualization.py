@@ -508,9 +508,69 @@ def test_plot_labels_and_marks_each_episode() -> None:
 
     assert "Episode 7" in labels
     assert "Episode 3" in labels
-    assert labels.count("Start") == 1
-    assert labels.count("End") == 1
+    assert labels.count("Episode start") == 1
+    assert labels.count("Episode end") == 1
     assert "Tool path" not in labels
 
     # One start and one end marker for each episode.
     assert len(axis.collections) == 4
+
+
+def test_plot_uses_episode_marker_labels_and_neutral_voxels() -> None:
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from lerobot_state_atlas.visualization import (
+        _plot_trajectory,
+    )
+
+    trajectory = ToolTrajectory(
+        arm="left",
+        link_name="tool0",
+        positions=torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.2, 0.1, 0.0],
+                [0.3, 0.1, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        episode_indices=torch.tensor(
+            [0, 0, 1, 1],
+            dtype=torch.int64,
+        ),
+    )
+    coverage = make_coverage(
+        trajectory,
+        voxel_size=0.05,
+    )
+
+    figure = Figure()
+    FigureCanvasAgg(figure)
+    axis = figure.add_subplot(
+        1,
+        1,
+        1,
+        projection="3d",
+    )
+
+    _plot_trajectory(
+        axis,
+        trajectory,
+        trajectory.positions,
+        coverage,
+    )
+    figure.canvas.draw()
+
+    _, labels = axis.get_legend_handles_labels()
+
+    assert "Episode start" in labels
+    assert "Episode end" in labels
+    assert "Start" not in labels
+    assert "End" not in labels
+
+    voxel_color = axis.collections[-1].get_facecolor()[0]
+
+    assert voxel_color[0] == pytest.approx(voxel_color[1])
+    assert voxel_color[1] == pytest.approx(voxel_color[2])
