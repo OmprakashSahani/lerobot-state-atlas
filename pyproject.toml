@@ -1,0 +1,16 @@
+[project]
+name = "lerobot-state-atlas"
+version = "0.1.0"
+description = "Analyze state coverage, trajectories, and reset consistency in LeRobot datasets."
+authors = [
+    { name = "Omprakash Sahani", email = "Omprakash.Sahani1206@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+lerobot-state-atlas = "lerobot_state_atlas:main"
+
+[build-system]
+requires = ["uv_build>=0.11.31,<0.12.0"]
+build-backend = "uv_build"
