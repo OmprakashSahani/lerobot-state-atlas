@@ -5,6 +5,7 @@ import torch
 
 from lerobot_state_atlas.state import (
     build_state_batch,
+    iter_state_batches,
     load_state_batch,
 )
 
@@ -78,3 +79,72 @@ def test_load_state_batch_requires_an_episode() -> None:
         match="At least one episode must be selected",
     ):
         load_state_batch("organization/dataset", [])
+
+
+def test_iter_state_batches_loads_bounded_episode_chunks(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, tuple[int, ...]]] = []
+
+    def fake_load_state_batch(
+        repo_id: str,
+        episodes: tuple[int, ...],
+    ) -> SimpleNamespace:
+        normalized_episodes = tuple(episodes)
+        calls.append((repo_id, normalized_episodes))
+        return SimpleNamespace(episodes=normalized_episodes)
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.state.load_state_batch",
+        fake_load_state_batch,
+    )
+
+    batches = tuple(
+        iter_state_batches(
+            "organization/dataset",
+            [2, 5, 8, 11, 14],
+            episode_batch_size=2,
+        )
+    )
+
+    assert calls == [
+        ("organization/dataset", (2, 5)),
+        ("organization/dataset", (8, 11)),
+        ("organization/dataset", (14,)),
+    ]
+    assert [batch.episodes for batch in batches] == [
+        (2, 5),
+        (8, 11),
+        (14,),
+    ]
+
+
+def test_iter_state_batches_requires_an_episode() -> None:
+    with pytest.raises(
+        ValueError,
+        match="At least one episode must be selected",
+    ):
+        tuple(
+            iter_state_batches(
+                "organization/dataset",
+                [],
+                episode_batch_size=4,
+            )
+        )
+
+
+@pytest.mark.parametrize("episode_batch_size", [0, -1])
+def test_iter_state_batches_rejects_invalid_batch_size(
+    episode_batch_size: int,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="Episode batch size must be greater than zero",
+    ):
+        tuple(
+            iter_state_batches(
+                "organization/dataset",
+                [0, 1],
+                episode_batch_size=episode_batch_size,
+            )
+        )

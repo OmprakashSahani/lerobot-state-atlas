@@ -781,3 +781,144 @@ def test_interactive_workspace_command(
     assert "Occupied voxels: 6" in result.stdout
     assert "Voxel size: 0.020 m" in result.stdout
     assert "localbase_linkframes" in compact_output(result.stdout)
+
+
+def test_aggregate_workspace_help() -> None:
+    result = runner.invoke(
+        app,
+        ["aggregate-workspace", "--help"],
+    )
+
+    assert result.exit_code == 0
+    assert "--urdf" in result.stdout
+    assert "--episode-start" in result.stdout
+    assert "--episode-end" in result.stdout
+    assert "--episode-batch-size" in result.stdout
+    assert "--voxel-size" in result.stdout
+    assert "--output" in result.stdout
+
+
+def test_aggregate_workspace_command(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text(
+        "<robot name='test'/>",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "aggregated-workspace.html"
+
+    summary = make_summary()
+    model = object()
+    coverages = (
+        SimpleNamespace(
+            arm="left",
+            num_points=10,
+            occupied_voxels=3,
+            voxel_size=0.02,
+        ),
+        SimpleNamespace(
+            arm="right",
+            num_points=10,
+            occupied_voxels=4,
+            voxel_size=0.02,
+        ),
+    )
+    calls: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.load_dataset_summary",
+        lambda repo_id: summary,
+    )
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.load_robot_model",
+        lambda path: model,
+    )
+
+    def fake_aggregate(
+        repo_id: str,
+        episodes: tuple[int, ...],
+        *,
+        component_names: tuple[str, ...],
+        model: object,
+        voxel_size: float,
+        episode_batch_size: int,
+    ) -> SimpleNamespace:
+        calls["repo_id"] = repo_id
+        calls["episodes"] = episodes
+        calls["component_names"] = component_names
+        calls["model"] = model
+        calls["voxel_size"] = voxel_size
+        calls["episode_batch_size"] = episode_batch_size
+
+        return SimpleNamespace(
+            coverages=coverages,
+            num_batches=2,
+            num_episodes=4,
+            num_frames=10,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.aggregate_workspace_coverages",
+        fake_aggregate,
+    )
+
+    def fake_save_heatmap(
+        workspace_coverages: tuple[SimpleNamespace, ...],
+        destination: Path,
+        *,
+        title: str,
+    ) -> InteractiveWorkspaceHeatmap:
+        calls["coverages"] = workspace_coverages
+        calls["output_path"] = destination
+        calls["title"] = title
+
+        return InteractiveWorkspaceHeatmap(
+            output_path=destination,
+            num_trajectories=0,
+            num_points=20,
+            occupied_voxels=7,
+            voxel_size=0.02,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.save_interactive_workspace_coverage_heatmap",
+        fake_save_heatmap,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "aggregate-workspace",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--episode-start",
+            "2",
+            "--episode-end",
+            "5",
+            "--episode-batch-size",
+            "2",
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls["repo_id"] == "DreamMachines/example"
+    assert calls["episodes"] == (2, 3, 4, 5)
+    assert calls["model"] is model
+    assert calls["voxel_size"] == pytest.approx(0.02)
+    assert calls["episode_batch_size"] == 2
+    assert calls["coverages"] is coverages
+    assert calls["output_path"] == output_path
+    assert calls["title"] == ("TRLC-DK1 Episodes 2-5 Aggregated Workspace Heatmap")
+
+    assert "Saved aggregated workspace heatmap" in result.stdout
+    assert "Aggregated 4 episodes across 2 batches" in result.stdout
+    assert "Processed 10 dataset frames" in result.stdout
+    assert "20 dual-arm tool points" in result.stdout
+    assert "Occupied voxels: 7" in result.stdout
+    assert "Voxel size: 0.020 m" in result.stdout
+    assert "localbase_linkframes" in compact_output(result.stdout)

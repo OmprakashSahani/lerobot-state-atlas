@@ -66,7 +66,7 @@ def _voxel_centers(
     coverage: WorkspaceCoverage,
 ) -> torch.Tensor:
     minimums = torch.tensor(
-        coverage.minimum_xyz,
+        coverage.voxel_origin_xyz,
         dtype=torch.float64,
     )
     voxel_minimums = (
@@ -482,6 +482,175 @@ def save_interactive_workspace_heatmap(
         output_path=destination,
         num_trajectories=len(trajectories),
         num_points=sum(trajectory.num_frames for trajectory in trajectories),
+        occupied_voxels=sum(coverage.occupied_voxels for coverage in coverages),
+        voxel_size=coverages[0].voxel_size,
+    )
+
+
+def save_interactive_workspace_coverage_heatmap(
+    coverages: tuple[WorkspaceCoverage, ...],
+    output_path: str | Path,
+    *,
+    title: str = "Aggregated workspace coverage heatmap",
+) -> InteractiveWorkspaceHeatmap:
+    """Save aggregated workspace coverage without trajectory data."""
+    if not coverages:
+        raise ValueError("At least one workspace coverage is required.")
+
+    voxel_sizes = {coverage.voxel_size for coverage in coverages}
+
+    if len(voxel_sizes) != 1:
+        raise ValueError("All coverages must use the same voxel size.")
+
+    for coverage in coverages:
+        if not coverage.arm:
+            raise ValueError("Coverage arm must not be empty.")
+
+        if not coverage.link_name:
+            raise ValueError("Coverage link name must not be empty.")
+
+        if coverage.num_points <= 0:
+            raise ValueError("Coverage must represent at least one point.")
+
+        if coverage.voxel_indices.ndim != 2 or coverage.voxel_indices.shape[1] != 3:
+            raise ValueError(
+                "Coverage voxel indices must have shape (occupied_voxels, 3)."
+            )
+
+        if coverage.visit_counts.ndim != 1:
+            raise ValueError("Coverage visit counts must be one-dimensional.")
+
+        if coverage.visit_counts.shape[0] != coverage.voxel_indices.shape[0]:
+            raise ValueError("Coverage visit-count size must match voxel count.")
+
+    destination = Path(output_path)
+
+    if destination.suffix.lower() != ".html":
+        raise ValueError("Interactive workspace output must use an .html suffix.")
+
+    destination.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    subplot_titles = tuple(
+        f"{coverage.arm.capitalize()} {coverage.link_name}" for coverage in coverages
+    )
+
+    figure = make_subplots(
+        rows=1,
+        cols=len(coverages),
+        specs=[[{"type": "scene"} for _ in coverages]],
+        subplot_titles=subplot_titles,
+    )
+
+    for column, coverage in enumerate(
+        coverages,
+        start=1,
+    ):
+        centers = _voxel_centers(coverage)
+        visit_counts = coverage.visit_counts.detach().to(
+            device="cpu",
+            dtype=torch.int64,
+        )
+
+        figure.add_trace(
+            go.Scatter3d(
+                x=centers[:, 0].tolist(),
+                y=centers[:, 1].tolist(),
+                z=centers[:, 2].tolist(),
+                mode="markers",
+                name=(f"{coverage.arm.capitalize()} visited voxels"),
+                marker={
+                    "size": 6,
+                    "color": visit_counts.tolist(),
+                    "coloraxis": "coloraxis",
+                    "opacity": 0.72,
+                },
+                customdata=visit_counts.tolist(),
+                hovertemplate=(
+                    "Visited voxel"
+                    "<br>x=%{x:.4f} m"
+                    "<br>y=%{y:.4f} m"
+                    "<br>z=%{z:.4f} m"
+                    "<br>visits=%{customdata}"
+                    "<extra></extra>"
+                ),
+            ),
+            row=1,
+            col=column,
+        )
+
+    scene_layout = {
+        "xaxis_title": "X (m)",
+        "yaxis_title": "Y (m)",
+        "zaxis_title": "Z (m)",
+        "aspectmode": "data",
+    }
+
+    layout_updates: dict[str, object] = {
+        "title": {
+            "text": title,
+            "x": 0.5,
+        },
+        "coloraxis": {
+            "colorscale": "Viridis",
+            "colorbar": {
+                "title": "Visits",
+                "x": 1.16,
+                "xanchor": "left",
+                "y": 0.5,
+                "yanchor": "middle",
+                "len": 0.82,
+                "thickness": 18,
+            },
+        },
+        "legend": {
+            "x": 1.02,
+            "xanchor": "left",
+            "y": 1.0,
+            "yanchor": "top",
+        },
+        "hovermode": "closest",
+        "template": "plotly_white",
+        "height": 650,
+        "margin": {
+            "l": 20,
+            "r": 260,
+            "t": 90,
+            "b": 70,
+        },
+    }
+
+    for index in range(1, len(coverages) + 1):
+        scene_name = "scene" if index == 1 else f"scene{index}"
+        layout_updates[scene_name] = scene_layout
+
+    figure.update_layout(**layout_updates)
+
+    figure.add_annotation(
+        text=("Left and right panels use their respective local base_link frames."),
+        x=0.5,
+        y=-0.08,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font={
+            "size": 12,
+        },
+    )
+
+    figure.write_html(
+        destination,
+        include_plotlyjs=True,
+        full_html=True,
+        auto_open=False,
+    )
+
+    return InteractiveWorkspaceHeatmap(
+        output_path=destination,
+        num_trajectories=0,
+        num_points=sum(coverage.num_points for coverage in coverages),
         occupied_voxels=sum(coverage.occupied_voxels for coverage in coverages),
         voxel_size=coverages[0].voxel_size,
     )

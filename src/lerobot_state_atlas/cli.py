@@ -5,11 +5,15 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from lerobot_state_atlas.aggregation import (
+    aggregate_workspace_coverages,
+)
 from lerobot_state_atlas.coverage import (
     compute_workspace_coverage,
 )
 from lerobot_state_atlas.dataset import load_dataset_summary
 from lerobot_state_atlas.interactive import (
+    save_interactive_workspace_coverage_heatmap,
     save_interactive_workspace_heatmap,
 )
 from lerobot_state_atlas.schema import DatasetSummary
@@ -367,6 +371,135 @@ def interactive_workspace(
     console.print(
         f"Plotted {result.num_points:,} points "
         f"across {result.num_trajectories} trajectories."
+    )
+    console.print(f"Occupied voxels: {result.occupied_voxels:,}")
+    console.print(f"Voxel size: {result.voxel_size:.3f} m")
+    console.print(
+        "[yellow]Coordinate note:[/yellow] "
+        "left and right panels use their respective "
+        "local base_link frames."
+    )
+
+
+@app.command("aggregate-workspace")
+def aggregate_workspace(
+    repo_id: str = typer.Argument(
+        ...,
+        help="Hugging Face repository ID of the LeRobot dataset.",
+    ),
+    urdf_path: Path = typer.Option(
+        ...,
+        "--urdf",
+        help="Path to the TRLC-DK1 follower URDF.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    episode_start: int = typer.Option(
+        0,
+        "--episode-start",
+        help="First episode index to aggregate.",
+    ),
+    episode_end: int = typer.Option(
+        ...,
+        "--episode-end",
+        help="Last episode index to aggregate, inclusive.",
+    ),
+    episode_batch_size: int = typer.Option(
+        32,
+        "--episode-batch-size",
+        help="Maximum number of episodes loaded in each batch.",
+    ),
+    voxel_size: float = typer.Option(
+        0.02,
+        "--voxel-size",
+        help="Workspace voxel edge length in metres.",
+    ),
+    output_path: Path = typer.Option(
+        Path("aggregated-workspace.html"),
+        "--output",
+        "-o",
+        help="Destination interactive HTML path.",
+    ),
+) -> None:
+    """Aggregate a large episode range into a workspace heatmap."""
+    try:
+        if episode_start < 0:
+            raise ValueError("Episode start must be nonnegative.")
+
+        if episode_end < 0:
+            raise ValueError("Episode end must be nonnegative.")
+
+        if episode_end < episode_start:
+            raise ValueError(
+                "Episode end must be greater than or equal to episode start."
+            )
+
+        if episode_batch_size <= 0:
+            raise ValueError("Episode batch size must be greater than zero.")
+
+        if not isfinite(voxel_size) or voxel_size <= 0.0:
+            raise ValueError("Voxel size must be finite and greater than zero.")
+
+        console.print(f"Loading metadata for [bold]{repo_id}[/bold]...")
+        summary = load_dataset_summary(repo_id)
+
+        if episode_end >= summary.total_episodes:
+            raise ValueError(
+                "Episode end must be less than the dataset "
+                f"episode count ({summary.total_episodes})."
+            )
+
+        component_names = _state_component_names(summary)
+        episodes = tuple(
+            range(
+                episode_start,
+                episode_end + 1,
+            )
+        )
+
+        console.print(f"Loading robot model from [bold]{urdf_path}[/bold]...")
+        model = load_robot_model(urdf_path)
+
+        console.print(
+            "Aggregating episodes "
+            f"[bold]{episode_start}-{episode_end}[/bold] "
+            f"in batches of {episode_batch_size}..."
+        )
+
+        aggregation = aggregate_workspace_coverages(
+            repo_id,
+            episodes,
+            component_names=component_names,
+            model=model,
+            voxel_size=voxel_size,
+            episode_batch_size=episode_batch_size,
+        )
+
+        result = save_interactive_workspace_coverage_heatmap(
+            aggregation.coverages,
+            output_path,
+            title=(
+                f"TRLC-DK1 Episodes {episode_start}-{episode_end} "
+                "Aggregated Workspace Heatmap"
+            ),
+        )
+    except Exception as error:
+        console.print(f"[red]Failed to aggregate workspace:[/red] {error}")
+        raise typer.Exit(code=1) from error
+
+    console.print(
+        f"Saved aggregated workspace heatmap to [bold]{result.output_path}[/bold]"
+    )
+    console.print(
+        f"Aggregated {aggregation.num_episodes:,} episodes "
+        f"across {aggregation.num_batches:,} batches."
+    )
+    console.print(
+        f"Processed {aggregation.num_frames:,} dataset frames "
+        f"and {result.num_points:,} dual-arm tool points."
     )
     console.print(f"Occupied voxels: {result.occupied_voxels:,}")
     console.print(f"Voxel size: {result.voxel_size:.3f} m")

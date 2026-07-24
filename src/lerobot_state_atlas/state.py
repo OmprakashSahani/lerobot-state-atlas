@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -74,3 +74,26 @@ def load_state_batch(
     )
 
     return build_state_batch(dataset)
+
+
+def iter_state_batches(
+    repo_id: str,
+    episodes: Sequence[int],
+    *,
+    episode_batch_size: int,
+) -> Iterator[StateBatch]:
+    """Load selected episodes in bounded batches."""
+    if not episodes:
+        raise ValueError("At least one episode must be selected.")
+
+    if episode_batch_size <= 0:
+        raise ValueError("Episode batch size must be greater than zero.")
+
+    normalized_episodes = tuple(episodes)
+
+    for start in range(0, len(normalized_episodes), episode_batch_size):
+        episode_chunk = normalized_episodes[start : start + episode_batch_size]
+        yield load_state_batch(
+            repo_id,
+            episodes=episode_chunk,
+        )
