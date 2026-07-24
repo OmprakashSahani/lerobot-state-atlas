@@ -9,6 +9,9 @@ from lerobot_state_atlas.coverage import (
     compute_workspace_coverage,
 )
 from lerobot_state_atlas.dataset import load_dataset_summary
+from lerobot_state_atlas.interactive import (
+    save_interactive_workspace_heatmap,
+)
 from lerobot_state_atlas.schema import DatasetSummary
 from lerobot_state_atlas.state import load_state_batch
 from lerobot_state_atlas.trajectory import (
@@ -248,6 +251,123 @@ def visualize_workspace(
         f"across {result.num_trajectories} "
         "trajectories."
     )
+    console.print(f"Voxel size: {result.voxel_size:.3f} m")
+    console.print(
+        "[yellow]Coordinate note:[/yellow] "
+        "left and right panels use their respective "
+        "local base_link frames."
+    )
+
+
+@app.command("interactive-workspace")
+def interactive_workspace(
+    repo_id: str = typer.Argument(
+        ...,
+        help=("Hugging Face repository ID of the LeRobot dataset."),
+    ),
+    urdf_path: Path = typer.Option(
+        ...,
+        "--urdf",
+        help="Path to the TRLC-DK1 follower URDF.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    episode: list[int] = typer.Option(
+        [0],
+        "--episode",
+        "-e",
+        help=(
+            "Episode index to visualize. Repeat this option "
+            "to combine multiple episodes."
+        ),
+    ),
+    voxel_size: float = typer.Option(
+        0.02,
+        "--voxel-size",
+        help="Workspace voxel edge length in metres.",
+    ),
+    output_path: Path = typer.Option(
+        Path("workspace-heatmap.html"),
+        "--output",
+        "-o",
+        help="Destination interactive HTML path.",
+    ),
+) -> None:
+    """Generate an interactive dual-arm workspace heatmap."""
+    try:
+        if not episode:
+            raise ValueError("At least one episode must be selected.")
+
+        if any(index < 0 for index in episode):
+            raise ValueError("Episode index must be nonnegative.")
+
+        if len(set(episode)) != len(episode):
+            raise ValueError("Episode indices must be unique.")
+
+        if not isfinite(voxel_size) or voxel_size <= 0.0:
+            raise ValueError("Voxel size must be finite and greater than zero.")
+
+        console.print(f"Loading metadata for [bold]{repo_id}[/bold]...")
+        summary = load_dataset_summary(repo_id)
+        component_names = _state_component_names(summary)
+
+        episode_text = ", ".join(str(index) for index in episode)
+        episode_label = "episode" if len(episode) == 1 else "episodes"
+
+        console.print(f"Loading {episode_label} [bold]{episode_text}[/bold]...")
+        batch = load_state_batch(
+            repo_id,
+            episodes=episode,
+        )
+
+        console.print(f"Loading robot model from [bold]{urdf_path}[/bold]...")
+        model = load_robot_model(urdf_path)
+
+        trajectories = tuple(
+            compute_tool_trajectory(
+                batch.states,
+                component_names,
+                model,
+                build_trlc_dk1_joint_component_map(arm),
+                arm=arm,
+                episode_indices=batch.episode_indices,
+            )
+            for arm in ("left", "right")
+        )
+
+        coverages = tuple(
+            compute_workspace_coverage(
+                trajectory,
+                voxel_size=voxel_size,
+            )
+            for trajectory in trajectories
+        )
+
+        result = save_interactive_workspace_heatmap(
+            trajectories,
+            output_path,
+            coverages=coverages,
+            title=(
+                f"TRLC-DK1 Episode {episode_text} Interactive Workspace Heatmap"
+                if len(episode) == 1
+                else (f"TRLC-DK1 Episodes {episode_text} Interactive Workspace Heatmap")
+            ),
+        )
+    except Exception as error:
+        console.print(f"[red]Failed to generate interactive workspace:[/red] {error}")
+        raise typer.Exit(code=1) from error
+
+    console.print(
+        f"Saved interactive workspace heatmap to [bold]{result.output_path}[/bold]"
+    )
+    console.print(
+        f"Plotted {result.num_points:,} points "
+        f"across {result.num_trajectories} trajectories."
+    )
+    console.print(f"Occupied voxels: {result.occupied_voxels:,}")
     console.print(f"Voxel size: {result.voxel_size:.3f} m")
     console.print(
         "[yellow]Coordinate note:[/yellow] "
