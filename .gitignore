@@ -219,3 +219,6 @@ __marimo__/
 
 # Locally downloaded robot models
 .cache/
+
+# Generated visualizations
+artifacts/
