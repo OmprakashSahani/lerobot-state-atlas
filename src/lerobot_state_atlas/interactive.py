@@ -523,6 +523,33 @@ def save_interactive_workspace_coverage_heatmap(
         if coverage.visit_counts.shape[0] != coverage.voxel_indices.shape[0]:
             raise ValueError("Coverage visit-count size must match voxel count.")
 
+        if coverage.num_episodes <= 0:
+            raise ValueError("Coverage must represent at least one episode.")
+
+        if coverage.episode_counts.ndim != 1:
+            raise ValueError("Coverage episode counts must be one-dimensional.")
+
+        if coverage.episode_counts.shape[0] != coverage.voxel_indices.shape[0]:
+            raise ValueError("Coverage episode-count size must match voxel count.")
+
+        if coverage.episode_frequencies.ndim != 1:
+            raise ValueError("Coverage episode frequencies must be one-dimensional.")
+
+        if coverage.episode_frequencies.shape[0] != coverage.voxel_indices.shape[0]:
+            raise ValueError("Coverage episode-frequency size must match voxel count.")
+
+        if not torch.isfinite(coverage.episode_frequencies).all().item():
+            raise ValueError(
+                "Coverage episode frequencies must contain only finite values."
+            )
+
+        if (coverage.episode_frequencies < 0.0).any().item() or (
+            coverage.episode_frequencies > 1.0
+        ).any().item():
+            raise ValueError(
+                "Coverage episode frequencies must be between zero and one."
+            )
+
     destination = Path(output_path)
 
     if destination.suffix.lower() != ".html":
@@ -544,6 +571,10 @@ def save_interactive_workspace_coverage_heatmap(
         subplot_titles=subplot_titles,
     )
 
+    visit_color_values: list[list[int]] = []
+    episode_count_color_values: list[list[int]] = []
+    episode_frequency_color_values: list[list[float]] = []
+
     for column, coverage in enumerate(
         coverages,
         start=1,
@@ -552,6 +583,27 @@ def save_interactive_workspace_coverage_heatmap(
         visit_counts = coverage.visit_counts.detach().to(
             device="cpu",
             dtype=torch.int64,
+        )
+        episode_counts = coverage.episode_counts.detach().to(
+            device="cpu",
+            dtype=torch.int64,
+        )
+        episode_frequencies = coverage.episode_frequencies.detach().to(
+            device="cpu",
+            dtype=torch.float64,
+        )
+
+        visit_color_values.append(visit_counts.tolist())
+        episode_count_color_values.append(episode_counts.tolist())
+        episode_frequency_color_values.append(episode_frequencies.tolist())
+
+        customdata = torch.stack(
+            (
+                visit_counts.to(dtype=torch.float64),
+                episode_counts.to(dtype=torch.float64),
+                episode_frequencies,
+            ),
+            dim=1,
         )
 
         figure.add_trace(
@@ -567,19 +619,69 @@ def save_interactive_workspace_coverage_heatmap(
                     "coloraxis": "coloraxis",
                     "opacity": 0.72,
                 },
-                customdata=visit_counts.tolist(),
+                customdata=customdata.tolist(),
                 hovertemplate=(
                     "Visited voxel"
                     "<br>x=%{x:.4f} m"
                     "<br>y=%{y:.4f} m"
                     "<br>z=%{z:.4f} m"
-                    "<br>visits=%{customdata}"
+                    "<br>visits=%{customdata[0]:.0f}"
+                    "<br>episodes=%{customdata[1]:.0f}"
+                    "<br>episode frequency=%{customdata[2]:.3f}"
                     "<extra></extra>"
                 ),
             ),
             row=1,
             col=column,
         )
+
+    metric_buttons = [
+        {
+            "label": "Visits",
+            "method": "update",
+            "args": [
+                {
+                    "marker.color": visit_color_values,
+                },
+                {
+                    "coloraxis.colorbar.title.text": "Visits",
+                    "coloraxis.cauto": True,
+                    "coloraxis.cmin": None,
+                    "coloraxis.cmax": None,
+                },
+            ],
+        },
+        {
+            "label": "Episode count",
+            "method": "update",
+            "args": [
+                {
+                    "marker.color": episode_count_color_values,
+                },
+                {
+                    "coloraxis.colorbar.title.text": "Episodes",
+                    "coloraxis.cauto": True,
+                    "coloraxis.cmin": None,
+                    "coloraxis.cmax": None,
+                },
+            ],
+        },
+        {
+            "label": "Episode frequency",
+            "method": "update",
+            "args": [
+                {
+                    "marker.color": episode_frequency_color_values,
+                },
+                {
+                    "coloraxis.colorbar.title.text": "Episode frequency",
+                    "coloraxis.cauto": False,
+                    "coloraxis.cmin": 0.0,
+                    "coloraxis.cmax": 1.0,
+                },
+            ],
+        },
+    ]
 
     scene_layout = {
         "xaxis_title": "X (m)",
@@ -611,6 +713,19 @@ def save_interactive_workspace_coverage_heatmap(
             "y": 1.0,
             "yanchor": "top",
         },
+        "updatemenus": [
+            {
+                "type": "dropdown",
+                "direction": "down",
+                "active": 0,
+                "buttons": metric_buttons,
+                "x": 1.0,
+                "xanchor": "right",
+                "y": 1.12,
+                "yanchor": "top",
+                "showactive": True,
+            }
+        ],
         "hovermode": "closest",
         "template": "plotly_white",
         "height": 650,

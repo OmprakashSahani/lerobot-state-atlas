@@ -536,3 +536,85 @@ def test_save_interactive_workspace_coverage_heatmap(
     assert captured["kwargs"]["include_plotlyjs"] is True
     assert captured["kwargs"]["full_html"] is True
     assert captured["kwargs"]["auto_open"] is False
+
+
+def test_coverage_heatmap_adds_episode_metric_selector(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    trajectory = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+        episode_indices=torch.tensor(
+            [0, 1, 1, 1],
+            dtype=torch.int64,
+        ),
+    )
+    coverage = compute_workspace_coverage(
+        trajectory,
+        voxel_size=0.25,
+        voxel_origin_xyz=(0.0, 0.0, 0.0),
+    )
+    captured: dict[str, go.Figure] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_coverage_heatmap(
+        (coverage,),
+        tmp_path / "episode-metrics.html",
+    )
+
+    figure = captured["figure"]
+    marker_trace = figure.data[0]
+
+    assert tuple(marker_trace.marker.color) == tuple(coverage.visit_counts.tolist())
+
+    menus = figure.layout.updatemenus
+    assert len(menus) == 1
+
+    buttons = menus[0].buttons
+    assert [button.label for button in buttons] == [
+        "Visits",
+        "Episode count",
+        "Episode frequency",
+    ]
+
+    visits_update = buttons[0].args[0]
+    episode_count_update = buttons[1].args[0]
+    episode_frequency_update = buttons[2].args[0]
+
+    assert visits_update["marker.color"] == [coverage.visit_counts.tolist()]
+    assert episode_count_update["marker.color"] == [coverage.episode_counts.tolist()]
+    assert episode_frequency_update["marker.color"] == [
+        coverage.episode_frequencies.tolist()
+    ]
+
+    assert buttons[0].args[1]["coloraxis.colorbar.title.text"] == "Visits"
+    assert buttons[0].args[1]["coloraxis.cauto"] is True
+
+    assert buttons[1].args[1]["coloraxis.colorbar.title.text"] == "Episodes"
+    assert buttons[1].args[1]["coloraxis.cauto"] is True
+
+    assert buttons[2].args[1]["coloraxis.colorbar.title.text"] == "Episode frequency"
+    assert buttons[2].args[1]["coloraxis.cauto"] is False
+    assert buttons[2].args[1]["coloraxis.cmin"] == 0.0
+    assert buttons[2].args[1]["coloraxis.cmax"] == 1.0
