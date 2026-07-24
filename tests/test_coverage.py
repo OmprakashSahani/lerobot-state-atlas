@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from lerobot_state_atlas.coverage import (
+    WorkspaceCoverageAccumulator,
     compute_workspace_coverage,
 )
 from lerobot_state_atlas.trajectory import ToolTrajectory
@@ -42,6 +43,7 @@ def test_compute_workspace_coverage() -> None:
     assert coverage.voxel_size == pytest.approx(0.5)
 
     assert coverage.minimum_xyz == pytest.approx((0.0, 0.0, 0.0))
+    assert coverage.voxel_origin_xyz == pytest.approx((0.0, 0.0, 0.0))
     assert coverage.maximum_xyz == pytest.approx((0.6, 0.6, 0.6))
     assert coverage.span_xyz == pytest.approx((0.6, 0.6, 0.6))
     assert coverage.centroid_xyz == pytest.approx((0.3, 0.3, 0.3))
@@ -225,4 +227,169 @@ def test_compute_workspace_coverage_rejects_empty_link() -> None:
                 link_name="",
             ),
             voxel_size=0.1,
+        )
+
+
+def test_compute_workspace_coverage_uses_explicit_voxel_origin() -> None:
+    trajectory = make_trajectory(
+        torch.tensor(
+            [
+                [-0.6, 0.1, 0.1],
+                [0.6, 0.1, 0.1],
+            ],
+            dtype=torch.float64,
+        )
+    )
+
+    coverage = compute_workspace_coverage(
+        trajectory,
+        voxel_size=0.5,
+        voxel_origin_xyz=(0.0, 0.0, 0.0),
+    )
+
+    assert coverage.minimum_xyz == pytest.approx((-0.6, 0.1, 0.1))
+    assert coverage.voxel_origin_xyz == pytest.approx((0.0, 0.0, 0.0))
+    assert coverage.grid_shape == (4, 1, 1)
+    assert coverage.total_voxels == 4
+
+    torch.testing.assert_close(
+        coverage.voxel_indices,
+        torch.tensor(
+            [
+                [-2, 0, 0],
+                [1, 0, 0],
+            ],
+            dtype=torch.int64,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "voxel_origin_xyz",
+    [
+        (0.0, 0.0),
+        (0.0, 0.0, 0.0, 0.0),
+        (float("nan"), 0.0, 0.0),
+        (float("inf"), 0.0, 0.0),
+    ],
+)
+def test_compute_workspace_coverage_rejects_invalid_voxel_origin(
+    voxel_origin_xyz: tuple[float, ...],
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="Voxel origin must contain three finite values",
+    ):
+        compute_workspace_coverage(
+            make_trajectory(
+                torch.tensor(
+                    [[0.0, 0.0, 0.0]],
+                    dtype=torch.float64,
+                )
+            ),
+            voxel_size=0.1,
+            voxel_origin_xyz=voxel_origin_xyz,
+        )
+
+
+def test_workspace_coverage_accumulator_matches_combined_trajectory() -> None:
+    first = make_trajectory(
+        torch.tensor(
+            [
+                [-0.6, 0.1, 0.0],
+                [-0.4, 0.1, 0.0],
+                [0.1, 0.1, 0.0],
+            ],
+            dtype=torch.float64,
+        )
+    )
+    second = make_trajectory(
+        torch.tensor(
+            [
+                [0.1, 0.1, 0.0],
+                [0.6, 0.1, 0.0],
+            ],
+            dtype=torch.float64,
+        )
+    )
+
+    accumulator = WorkspaceCoverageAccumulator(
+        arm="left",
+        link_name="tool0",
+        voxel_size=0.5,
+        voxel_origin_xyz=(0.0, 0.0, 0.0),
+    )
+    accumulator.update(first)
+    accumulator.update(second)
+
+    aggregated = accumulator.finalize()
+
+    combined = make_trajectory(
+        torch.cat(
+            [first.positions, second.positions],
+            dim=0,
+        )
+    )
+    expected = compute_workspace_coverage(
+        combined,
+        voxel_size=0.5,
+        voxel_origin_xyz=(0.0, 0.0, 0.0),
+    )
+
+    assert aggregated.arm == expected.arm
+    assert aggregated.link_name == expected.link_name
+    assert aggregated.num_points == expected.num_points
+    assert aggregated.voxel_size == pytest.approx(expected.voxel_size)
+    assert aggregated.minimum_xyz == pytest.approx(expected.minimum_xyz)
+    assert aggregated.voxel_origin_xyz == pytest.approx(expected.voxel_origin_xyz)
+    assert aggregated.maximum_xyz == pytest.approx(expected.maximum_xyz)
+    assert aggregated.span_xyz == pytest.approx(expected.span_xyz)
+    assert aggregated.centroid_xyz == pytest.approx(expected.centroid_xyz)
+    assert aggregated.grid_shape == expected.grid_shape
+    assert aggregated.occupied_voxels == expected.occupied_voxels
+    assert aggregated.total_voxels == expected.total_voxels
+    assert aggregated.occupancy_ratio == pytest.approx(expected.occupancy_ratio)
+    assert aggregated.bounding_box_volume == pytest.approx(expected.bounding_box_volume)
+    assert aggregated.occupied_volume == pytest.approx(expected.occupied_volume)
+
+    torch.testing.assert_close(
+        aggregated.voxel_indices,
+        expected.voxel_indices,
+    )
+    torch.testing.assert_close(
+        aggregated.visit_counts,
+        expected.visit_counts,
+    )
+
+
+def test_workspace_coverage_accumulator_requires_data() -> None:
+    accumulator = WorkspaceCoverageAccumulator(
+        arm="left",
+        link_name="tool0",
+        voxel_size=0.1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="at least one trajectory",
+    ):
+        accumulator.finalize()
+
+
+def test_workspace_coverage_accumulator_rejects_mismatched_arm() -> None:
+    accumulator = WorkspaceCoverageAccumulator(
+        arm="left",
+        link_name="tool0",
+        voxel_size=0.1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Trajectory arm must match accumulator arm",
+    ):
+        accumulator.update(
+            make_trajectory(
+                torch.tensor([[0.0, 0.0, 0.0]]),
+                arm="right",
+            )
         )

@@ -213,7 +213,7 @@ def _plot_trajectory(
 
     if coverage is not None:
         minimums = torch.tensor(
-            coverage.minimum_xyz,
+            coverage.voxel_origin_xyz,
             dtype=torch.float64,
         )
         voxel_minimums = (

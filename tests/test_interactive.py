@@ -7,6 +7,7 @@ from plotly import graph_objects as go
 
 from lerobot_state_atlas.coverage import compute_workspace_coverage
 from lerobot_state_atlas.interactive import (
+    save_interactive_workspace_coverage_heatmap,
     save_interactive_workspace_heatmap,
 )
 from lerobot_state_atlas.trajectory import ToolTrajectory
@@ -438,3 +439,100 @@ def test_interactive_heatmap_embeds_trajectory_playback(
     assert "lerobot-playback-reset" in script
     assert "Plotly.extendTraces" in script
     assert "frameIntervalMs = 20" in script
+
+
+def test_save_interactive_workspace_coverage_heatmap(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    left = make_trajectory(
+        torch.tensor(
+            [
+                [-0.2, 0.0, 0.1],
+                [0.0, 0.1, 0.2],
+                [0.2, 0.2, 0.3],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+    )
+    right = make_trajectory(
+        torch.tensor(
+            [
+                [-0.1, 0.0, 0.1],
+                [0.1, -0.1, 0.2],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="right",
+    )
+
+    coverages = (
+        compute_workspace_coverage(
+            left,
+            voxel_size=0.05,
+            voxel_origin_xyz=(0.0, 0.0, 0.0),
+        ),
+        compute_workspace_coverage(
+            right,
+            voxel_size=0.05,
+            voxel_origin_xyz=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    output_path = tmp_path / "aggregated-workspace.html"
+
+    result = save_interactive_workspace_coverage_heatmap(
+        coverages,
+        output_path,
+        title="Aggregated workspace coverage",
+    )
+
+    assert result.output_path == output_path
+    assert result.num_trajectories == 0
+    assert result.num_points == 5
+    assert result.occupied_voxels == sum(
+        coverage.occupied_voxels for coverage in coverages
+    )
+    assert result.voxel_size == pytest.approx(0.05)
+
+    figure = captured["figure"]
+    assert isinstance(figure, go.Figure)
+
+    assert not [trace for trace in figure.data if trace.mode == "lines"]
+
+    marker_traces = [trace for trace in figure.data if trace.mode == "markers"]
+
+    assert [trace.name for trace in marker_traces] == [
+        "Left visited voxels",
+        "Right visited voxels",
+    ]
+
+    annotation_texts = [annotation.text for annotation in figure.layout.annotations]
+
+    assert "Left tool0" in annotation_texts
+    assert "Right tool0" in annotation_texts
+    assert (
+        "Left and right panels use their respective local base_link frames."
+        in annotation_texts
+    )
+
+    assert captured["kwargs"]["include_plotlyjs"] is True
+    assert captured["kwargs"]["full_html"] is True
+    assert captured["kwargs"]["auto_open"] is False

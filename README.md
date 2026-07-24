@@ -12,6 +12,7 @@ LeRobot State Atlas loads robot state trajectories, applies forward kinematics u
 - Measure workspace coverage with configurable 3D voxel sizes.
 - Generate static PNG workspace plots.
 - Generate self-contained interactive Plotly HTML visualizations.
+- Aggregate large episode ranges in bounded memory.
 - Compare multiple episodes with separate trajectory colours.
 - Hover over voxels to inspect coordinates and visit counts.
 - Rotate, zoom, and pan each arm workspace independently.
@@ -103,6 +104,37 @@ The interactive visualization provides:
 
 The visited-voxel heatmap remains visible while the trajectories are progressively drawn.
 
+## Aggregate many episodes
+
+For larger selections, generate a coverage-only heatmap while loading episodes in bounded batches:
+
+    uv run lerobot-state-atlas aggregate-workspace \
+      DreamMachines/actuator_unboxing_4h_diverse \
+      --urdf .cache/robot-models/trlc-dk1/TRLC-DK1-Follower.urdf \
+      --episode-start 0 \
+      --episode-end 99 \
+      --episode-batch-size 10 \
+      --voxel-size 0.02 \
+      --output artifacts/episodes-0-99-aggregated-workspace.html
+
+`--episode-end` is inclusive. The command:
+
+- loads at most the configured number of episodes per batch
+- computes left and right tool positions for each batch
+- incrementally accumulates voxel visit counts
+- retains aggregate statistics instead of every trajectory point
+- writes a self-contained interactive HTML heatmap
+
+The aggregated view intentionally omits individual trajectory lines and playback. This keeps memory usage and HTML size practical when analysing tens, hundreds, or all dataset episodes.
+
+A real validation using episodes 0 through 9 produced:
+
+- 10 episodes processed across 4 bounded batches
+- 5,124 dataset frames
+- 10,248 dual-arm tool points
+- 1,224 occupied voxels at a `0.020 m` voxel size
+- a 4.7 MB self-contained HTML visualization
+
 ## Coordinate frames
 
 The left and right panels use their respective local `base_link` frames.
@@ -142,7 +174,7 @@ Check the Git diff for whitespace errors:
 
 ## Current validation status
 
-- 117 tests passed
+- 135 tests passed
 - Ruff lint passed
 - Ruff formatting check passed
 - `git diff --check` passed
