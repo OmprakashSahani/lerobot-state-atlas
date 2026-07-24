@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from plotly import graph_objects as go
 
 from lerobot_state_atlas.coverage import compute_workspace_coverage
 from lerobot_state_atlas.interactive import (
@@ -15,11 +16,13 @@ def make_trajectory(
     positions: torch.Tensor,
     *,
     arm: str,
+    episode_indices: torch.Tensor | None = None,
 ) -> ToolTrajectory:
     return ToolTrajectory(
         arm=arm,
         link_name="tool0",
         positions=positions,
+        episode_indices=episode_indices,
     )
 
 
@@ -203,3 +206,106 @@ def test_interactive_heatmap_rejects_coverage_arm(
                 ),
             ),
         )
+
+
+def test_interactive_heatmap_splits_episode_trajectory_lines(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    trajectory = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.1, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+        episode_indices=torch.tensor(
+            [2, 2, 5, 5],
+            dtype=torch.int64,
+        ),
+    )
+    coverage = compute_workspace_coverage(
+        trajectory,
+        voxel_size=0.05,
+    )
+    captured: dict[str, go.Figure] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_heatmap(
+        (trajectory,),
+        tmp_path / "workspace.html",
+        coverages=(coverage,),
+    )
+
+    line_traces = [trace for trace in captured["figure"].data if trace.mode == "lines"]
+
+    assert [trace.name for trace in line_traces] == [
+        "Left episode 2",
+        "Left episode 5",
+    ]
+    assert [tuple(trace.x) for trace in line_traces] == [
+        (0.0, 0.1),
+        (1.0, 1.1),
+    ]
+
+
+def test_interactive_heatmap_separates_legend_and_colorbar(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    trajectory = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.1, 0.1],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+    )
+    coverage = compute_workspace_coverage(
+        trajectory,
+        voxel_size=0.05,
+    )
+    captured: dict[str, go.Figure] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_heatmap(
+        (trajectory,),
+        tmp_path / "workspace.html",
+        coverages=(coverage,),
+    )
+
+    layout = captured["figure"].layout
+
+    assert layout.legend.x == pytest.approx(1.02)
+    assert layout.coloraxis.colorbar.x == pytest.approx(1.16)
+    assert layout.margin.r >= 180

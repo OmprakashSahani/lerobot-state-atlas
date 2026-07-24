@@ -75,6 +75,48 @@ def _voxel_centers(
     return voxel_minimums + coverage.voxel_size / 2.0
 
 
+def _episode_position_segments(
+    trajectory: ToolTrajectory,
+) -> tuple[tuple[int | None, torch.Tensor], ...]:
+    positions = trajectory.positions.detach().to(
+        device="cpu",
+        dtype=torch.float64,
+    )
+    episode_indices = trajectory.episode_indices
+
+    if episode_indices is None:
+        return ((None, positions),)
+
+    episodes = episode_indices.detach().to(
+        device="cpu",
+        dtype=torch.int64,
+    )
+    transition_indices = (
+        torch.nonzero(
+            episodes[1:] != episodes[:-1],
+            as_tuple=False,
+        ).flatten()
+        + 1
+    )
+    boundaries = (
+        0,
+        *transition_indices.tolist(),
+        positions.shape[0],
+    )
+
+    return tuple(
+        (
+            int(episodes[start].item()),
+            positions[start:end],
+        )
+        for start, end in zip(
+            boundaries[:-1],
+            boundaries[1:],
+            strict=True,
+        )
+    )
+
+
 def save_interactive_workspace_heatmap(
     trajectories: tuple[ToolTrajectory, ...],
     output_path: str | Path,
@@ -118,37 +160,43 @@ def save_interactive_workspace_heatmap(
         ),
         start=1,
     ):
-        positions = trajectory.positions.detach().to(
-            device="cpu",
-            dtype=torch.float64,
-        )
         centers = _voxel_centers(coverage)
         visit_counts = coverage.visit_counts.detach().to(
             device="cpu",
             dtype=torch.int64,
         )
 
-        figure.add_trace(
-            go.Scatter3d(
-                x=positions[:, 0].tolist(),
-                y=positions[:, 1].tolist(),
-                z=positions[:, 2].tolist(),
-                mode="lines",
-                name=f"{trajectory.arm.capitalize()} trajectory",
-                line={
-                    "width": 4,
-                },
-                hovertemplate=(
-                    "Trajectory"
-                    "<br>x=%{x:.4f} m"
-                    "<br>y=%{y:.4f} m"
-                    "<br>z=%{z:.4f} m"
-                    "<extra></extra>"
+        for episode_index, positions in _episode_position_segments(trajectory):
+            trace_name = (
+                f"{trajectory.arm.capitalize()} trajectory"
+                if episode_index is None
+                else (f"{trajectory.arm.capitalize()} episode {episode_index}")
+            )
+            hover_label = (
+                "Trajectory" if episode_index is None else f"Episode {episode_index}"
+            )
+
+            figure.add_trace(
+                go.Scatter3d(
+                    x=positions[:, 0].tolist(),
+                    y=positions[:, 1].tolist(),
+                    z=positions[:, 2].tolist(),
+                    mode="lines",
+                    name=trace_name,
+                    line={
+                        "width": 4,
+                    },
+                    hovertemplate=(
+                        hover_label
+                        + "<br>x=%{x:.4f} m"
+                        + "<br>y=%{y:.4f} m"
+                        + "<br>z=%{z:.4f} m"
+                        + "<extra></extra>"
+                    ),
                 ),
-            ),
-            row=1,
-            col=column,
-        )
+                row=1,
+                col=column,
+            )
 
         figure.add_trace(
             go.Scatter3d(
@@ -193,14 +241,26 @@ def save_interactive_workspace_heatmap(
             "colorscale": "Viridis",
             "colorbar": {
                 "title": "Visits",
+                "x": 1.16,
+                "xanchor": "left",
+                "y": 0.5,
+                "yanchor": "middle",
+                "len": 0.82,
+                "thickness": 18,
             },
+        },
+        "legend": {
+            "x": 1.02,
+            "xanchor": "left",
+            "y": 1.0,
+            "yanchor": "top",
         },
         "hovermode": "closest",
         "template": "plotly_white",
         "height": 650,
         "margin": {
             "l": 20,
-            "r": 20,
+            "r": 260,
             "t": 90,
             "b": 20,
         },
