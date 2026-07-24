@@ -262,7 +262,7 @@ def save_interactive_workspace_heatmap(
             "l": 20,
             "r": 260,
             "t": 90,
-            "b": 20,
+            "b": 70,
         },
     }
 
@@ -271,6 +271,17 @@ def save_interactive_workspace_heatmap(
         layout_updates[scene_name] = scene_layout
 
     figure.update_layout(**layout_updates)
+    figure.add_annotation(
+        text=("Left and right panels use their respective local base_link frames."),
+        x=0.5,
+        y=-0.08,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font={
+            "size": 12,
+        },
+    )
 
     figure.write_html(
         destination,

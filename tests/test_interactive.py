@@ -309,3 +309,67 @@ def test_interactive_heatmap_separates_legend_and_colorbar(
     assert layout.legend.x == pytest.approx(1.02)
     assert layout.coloraxis.colorbar.x == pytest.approx(1.16)
     assert layout.margin.r >= 180
+
+
+def test_interactive_heatmap_displays_coordinate_frame_note(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    left = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.1, 0.1],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+    )
+    right = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, -0.1, 0.1],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="right",
+    )
+    captured: dict[str, go.Figure] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_heatmap(
+        (left, right),
+        tmp_path / "workspace.html",
+        coverages=(
+            compute_workspace_coverage(
+                left,
+                voxel_size=0.05,
+            ),
+            compute_workspace_coverage(
+                right,
+                voxel_size=0.05,
+            ),
+        ),
+    )
+
+    annotation_texts = [
+        annotation.text for annotation in captured["figure"].layout.annotations
+    ]
+
+    assert (
+        "Left and right panels use their respective local base_link frames."
+    ) in annotation_texts
+    assert captured["figure"].layout.margin.b >= 60
