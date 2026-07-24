@@ -733,11 +733,13 @@ def test_interactive_workspace_command(
         *,
         coverages: tuple[SimpleNamespace, ...],
         title: str,
+        playback_fps: float,
     ) -> InteractiveWorkspaceHeatmap:
         calls["trajectories"] = trajectories
         calls["coverages"] = coverages
         calls["output_path"] = destination
         calls["title"] = title
+        calls["playback_fps"] = playback_fps
 
         return InteractiveWorkspaceHeatmap(
             output_path=destination,
@@ -773,6 +775,7 @@ def test_interactive_workspace_command(
     assert calls["episodes"] == [2, 5]
     assert calls["output_path"] == output_path
     assert calls["title"] == ("TRLC-DK1 Episodes 2, 5 Interactive Workspace Heatmap")
+    assert calls["playback_fps"] == pytest.approx(50.0)
     assert "Saved interactive workspace heatmap" in result.stdout
     assert "Plotted 8 points" in result.stdout
     assert "Occupied voxels: 6" in result.stdout
