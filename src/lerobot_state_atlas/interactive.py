@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 
 import torch
@@ -117,18 +118,181 @@ def _episode_position_segments(
     )
 
 
+def _trajectory_playback_script(
+    playback_fps: float,
+) -> str:
+    frame_interval_ms = 1000.0 / playback_fps
+    interval_text = f"{frame_interval_ms:g}"
+
+    return f"""
+(function() {{
+    const graph = document.getElementById('{{plot_id}}');
+
+    if (!graph) {{
+        return;
+    }}
+
+    const frameIntervalMs = {interval_text};
+    const trajectories = [];
+
+    graph.data.forEach((trace, traceIndex) => {{
+        const meta = trace.meta || {{}};
+
+        if (!Array.isArray(meta.playback_x)) {{
+            return;
+        }}
+
+        trajectories.push({{
+            traceIndex: traceIndex,
+            startFrame: meta.playback_start_frame,
+            x: meta.playback_x,
+            y: meta.playback_y,
+            z: meta.playback_z
+        }});
+    }});
+
+    if (trajectories.length === 0) {{
+        return;
+    }}
+
+    const controls = document.createElement("div");
+    controls.style.display = "flex";
+    controls.style.alignItems = "center";
+    controls.style.justifyContent = "center";
+    controls.style.gap = "10px";
+    controls.style.margin = "12px 0 4px";
+
+    const toggleButton = document.createElement("button");
+    toggleButton.id = "lerobot-playback-toggle";
+    toggleButton.type = "button";
+    toggleButton.textContent = "Play";
+
+    const resetButton = document.createElement("button");
+    resetButton.id = "lerobot-playback-reset";
+    resetButton.type = "button";
+    resetButton.textContent = "Reset";
+
+    const frameLabel = document.createElement("span");
+    frameLabel.id = "lerobot-playback-frame";
+    frameLabel.textContent = "Frame 0";
+
+    controls.appendChild(toggleButton);
+    controls.appendChild(resetButton);
+    controls.appendChild(frameLabel);
+    graph.parentNode.insertBefore(controls, graph);
+
+    const totalFrames = trajectories.reduce(
+        (maximum, trajectory) =>
+            Math.max(
+                maximum,
+                trajectory.startFrame + trajectory.x.length
+            ),
+        0
+    );
+
+    let currentFrame = 0;
+    let timer = null;
+
+    function stopPlayback() {{
+        if (timer !== null) {{
+            window.clearInterval(timer);
+            timer = null;
+        }}
+
+        toggleButton.textContent = "Play";
+    }}
+
+    function resetPlayback() {{
+        stopPlayback();
+        currentFrame = 0;
+        frameLabel.textContent = "Frame 0";
+
+        trajectories.forEach((trajectory) => {{
+            Plotly.restyle(
+                graph,
+                {{
+                    x: [[]],
+                    y: [[]],
+                    z: [[]]
+                }},
+                [trajectory.traceIndex]
+            );
+        }});
+    }}
+
+    function advancePlayback() {{
+        trajectories.forEach((trajectory) => {{
+            const localFrame =
+                currentFrame - trajectory.startFrame;
+
+            if (
+                localFrame >= 0 &&
+                localFrame < trajectory.x.length
+            ) {{
+                Plotly.extendTraces(
+                    graph,
+                    {{
+                        x: [[trajectory.x[localFrame]]],
+                        y: [[trajectory.y[localFrame]]],
+                        z: [[trajectory.z[localFrame]]]
+                    }},
+                    [trajectory.traceIndex]
+                );
+            }}
+        }});
+
+        currentFrame += 1;
+        frameLabel.textContent =
+            "Frame " + Math.min(currentFrame, totalFrames);
+
+        if (currentFrame >= totalFrames) {{
+            stopPlayback();
+        }}
+    }}
+
+    toggleButton.addEventListener("click", () => {{
+        if (timer !== null) {{
+            stopPlayback();
+            return;
+        }}
+
+        if (currentFrame >= totalFrames) {{
+            resetPlayback();
+        }}
+
+        toggleButton.textContent = "Pause";
+        timer = window.setInterval(
+            advancePlayback,
+            frameIntervalMs
+        );
+    }});
+
+    resetButton.addEventListener(
+        "click",
+        resetPlayback
+    );
+
+    resetPlayback();
+}})();
+"""
+
+
 def save_interactive_workspace_heatmap(
     trajectories: tuple[ToolTrajectory, ...],
     output_path: str | Path,
     *,
     coverages: tuple[WorkspaceCoverage, ...],
     title: str = "Interactive tool workspace heatmap",
+    playback_fps: float | None = None,
 ) -> InteractiveWorkspaceHeatmap:
     """Save an offline interactive 3D workspace heatmap as HTML."""
     _validate_inputs(
         trajectories,
         coverages,
     )
+
+    if playback_fps is not None and (not isfinite(playback_fps) or playback_fps <= 0.0):
+        raise ValueError("Playback FPS must be finite and greater than zero.")
 
     destination = Path(output_path)
 
@@ -166,6 +330,8 @@ def save_interactive_workspace_heatmap(
             dtype=torch.int64,
         )
 
+        playback_start_frame = 0
+
         for episode_index, positions in _episode_position_segments(trajectory):
             trace_name = (
                 f"{trajectory.arm.capitalize()} trajectory"
@@ -176,15 +342,28 @@ def save_interactive_workspace_heatmap(
                 "Trajectory" if episode_index is None else f"Episode {episode_index}"
             )
 
+            playback_x = positions[:, 0].tolist()
+            playback_y = positions[:, 1].tolist()
+            playback_z = positions[:, 2].tolist()
+            displayed_positions = (
+                positions[:0] if playback_fps is not None else positions
+            )
+
             figure.add_trace(
                 go.Scatter3d(
-                    x=positions[:, 0].tolist(),
-                    y=positions[:, 1].tolist(),
-                    z=positions[:, 2].tolist(),
+                    x=displayed_positions[:, 0].tolist(),
+                    y=displayed_positions[:, 1].tolist(),
+                    z=displayed_positions[:, 2].tolist(),
                     mode="lines",
                     name=trace_name,
                     line={
                         "width": 4,
+                    },
+                    meta={
+                        "playback_start_frame": (playback_start_frame),
+                        "playback_x": playback_x,
+                        "playback_y": playback_y,
+                        "playback_z": playback_z,
                     },
                     hovertemplate=(
                         hover_label
@@ -197,6 +376,8 @@ def save_interactive_workspace_heatmap(
                 row=1,
                 col=column,
             )
+
+            playback_start_frame += positions.shape[0]
 
         figure.add_trace(
             go.Scatter3d(
@@ -283,11 +464,18 @@ def save_interactive_workspace_heatmap(
         },
     )
 
+    write_options: dict[str, object] = {
+        "include_plotlyjs": True,
+        "full_html": True,
+        "auto_open": False,
+    }
+
+    if playback_fps is not None:
+        write_options["post_script"] = _trajectory_playback_script(playback_fps)
+
     figure.write_html(
         destination,
-        include_plotlyjs=True,
-        full_html=True,
-        auto_open=False,
+        **write_options,
     )
 
     return InteractiveWorkspaceHeatmap(

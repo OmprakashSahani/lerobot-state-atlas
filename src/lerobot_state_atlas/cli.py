@@ -350,6 +350,7 @@ def interactive_workspace(
             trajectories,
             output_path,
             coverages=coverages,
+            playback_fps=summary.fps,
             title=(
                 f"TRLC-DK1 Episode {episode_text} Interactive Workspace Heatmap"
                 if len(episode) == 1

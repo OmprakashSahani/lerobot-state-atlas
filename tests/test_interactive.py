@@ -373,3 +373,68 @@ def test_interactive_heatmap_displays_coordinate_frame_note(
         "Left and right panels use their respective local base_link frames."
     ) in annotation_texts
     assert captured["figure"].layout.margin.b >= 60
+
+
+def test_interactive_heatmap_embeds_trajectory_playback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    trajectory = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.1, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+        episode_indices=torch.tensor(
+            [2, 2, 5, 5],
+            dtype=torch.int64,
+        ),
+    )
+    coverage = compute_workspace_coverage(
+        trajectory,
+        voxel_size=0.05,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_heatmap(
+        (trajectory,),
+        tmp_path / "workspace.html",
+        coverages=(coverage,),
+        playback_fps=50.0,
+    )
+
+    figure = captured["figure"]
+    assert isinstance(figure, go.Figure)
+
+    line_traces = [trace for trace in figure.data if trace.mode == "lines"]
+
+    assert [trace.meta["playback_start_frame"] for trace in line_traces] == [0, 2]
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+
+    script = kwargs["post_script"]
+    assert isinstance(script, str)
+    assert "lerobot-playback-toggle" in script
+    assert "lerobot-playback-reset" in script
+    assert "Plotly.extendTraces" in script
+    assert "frameIntervalMs = 20" in script
