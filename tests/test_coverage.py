@@ -393,3 +393,118 @@ def test_workspace_coverage_accumulator_rejects_mismatched_arm() -> None:
                 arm="right",
             )
         )
+
+
+def test_compute_workspace_coverage_counts_distinct_episodes_per_voxel() -> None:
+    trajectory = ToolTrajectory(
+        arm="left",
+        link_name="tool0",
+        positions=torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.2, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        episode_indices=torch.tensor(
+            [0, 0, 1, 1, 1],
+            dtype=torch.int64,
+        ),
+    )
+
+    coverage = compute_workspace_coverage(
+        trajectory,
+        voxel_size=0.25,
+    )
+
+    assert coverage.num_episodes == 2
+
+    torch.testing.assert_close(
+        coverage.visit_counts,
+        torch.tensor([3, 2], dtype=torch.int64),
+    )
+    torch.testing.assert_close(
+        coverage.episode_counts,
+        torch.tensor([2, 1], dtype=torch.int64),
+    )
+    torch.testing.assert_close(
+        coverage.episode_frequencies,
+        torch.tensor([1.0, 0.5], dtype=torch.float64),
+    )
+
+
+def test_workspace_coverage_accumulator_counts_episodes_across_batches() -> None:
+    first = ToolTrajectory(
+        arm="left",
+        link_name="tool0",
+        positions=torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        episode_indices=torch.tensor(
+            [0, 0, 1],
+            dtype=torch.int64,
+        ),
+    )
+    second = ToolTrajectory(
+        arm="left",
+        link_name="tool0",
+        positions=torch.tensor(
+            [
+                [0.1, 0.0, 0.0],
+                [0.6, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        episode_indices=torch.tensor(
+            [2, 2],
+            dtype=torch.int64,
+        ),
+    )
+
+    accumulator = WorkspaceCoverageAccumulator(
+        arm="left",
+        link_name="tool0",
+        voxel_size=0.25,
+        voxel_origin_xyz=(0.0, 0.0, 0.0),
+    )
+    accumulator.update(first)
+    accumulator.update(second)
+
+    coverage = accumulator.finalize()
+
+    assert coverage.num_episodes == 3
+
+    torch.testing.assert_close(
+        coverage.voxel_indices,
+        torch.tensor(
+            [
+                [0, 0, 0],
+                [1, 0, 0],
+                [2, 0, 0],
+            ],
+            dtype=torch.int64,
+        ),
+    )
+    torch.testing.assert_close(
+        coverage.visit_counts,
+        torch.tensor([3, 1, 1], dtype=torch.int64),
+    )
+    torch.testing.assert_close(
+        coverage.episode_counts,
+        torch.tensor([2, 1, 1], dtype=torch.int64),
+    )
+    torch.testing.assert_close(
+        coverage.episode_frequencies,
+        torch.tensor(
+            [2.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            dtype=torch.float64,
+        ),
+    )

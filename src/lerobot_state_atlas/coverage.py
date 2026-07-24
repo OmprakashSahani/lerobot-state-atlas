@@ -19,6 +19,7 @@ class WorkspaceCoverage:
     arm: str
     link_name: str
     num_points: int
+    num_episodes: int
     voxel_size: float
     minimum_xyz: Vector3
     voxel_origin_xyz: Vector3
@@ -33,6 +34,8 @@ class WorkspaceCoverage:
     occupied_volume: float
     voxel_indices: Tensor
     visit_counts: Tensor
+    episode_counts: Tensor
+    episode_frequencies: Tensor
 
     @property
     def maximum_visit_count(self) -> int:
@@ -59,6 +62,40 @@ def _as_grid_shape(values: Tensor) -> GridShape:
         int(values[1].item()),
         int(values[2].item()),
     )
+
+
+def _trajectory_episode_indices(
+    trajectory: ToolTrajectory,
+    *,
+    num_points: int,
+) -> Tensor:
+    """Return validated frame-aligned episode indices on the CPU."""
+    if trajectory.episode_indices is None:
+        return torch.zeros(
+            num_points,
+            dtype=torch.int64,
+        )
+
+    episode_indices = trajectory.episode_indices.detach().to(device="cpu")
+
+    if episode_indices.ndim != 1 or episode_indices.shape[0] != num_points:
+        raise ValueError("Trajectory episode indices must have shape (num_points,).")
+
+    if episode_indices.dtype == torch.bool or episode_indices.dtype.is_complex:
+        raise ValueError("Trajectory episode indices must contain integers.")
+
+    if episode_indices.dtype.is_floating_point:
+        if not torch.isfinite(episode_indices).all().item():
+            raise ValueError(
+                "Trajectory episode indices must contain only finite values."
+            )
+
+        rounded = torch.round(episode_indices)
+
+        if not torch.equal(episode_indices, rounded):
+            raise ValueError("Trajectory episode indices must contain integers.")
+
+    return episode_indices.to(dtype=torch.int64)
 
 
 def compute_workspace_coverage(
@@ -95,6 +132,12 @@ def compute_workspace_coverage(
     if not torch.isfinite(values).all().item():
         raise ValueError("Trajectory positions must contain only finite values.")
 
+    episode_indices = _trajectory_episode_indices(
+        trajectory,
+        num_points=num_points,
+    )
+    num_episodes = int(torch.unique(episode_indices).numel())
+
     minimums = values.min(dim=0).values
     maximums = values.max(dim=0).values
     spans = maximums - minimums
@@ -124,6 +167,29 @@ def compute_workspace_coverage(
         return_counts=True,
     )
 
+    voxel_episode_pairs = torch.unique(
+        torch.cat(
+            (
+                point_voxel_indices,
+                episode_indices.unsqueeze(dim=1),
+            ),
+            dim=1,
+        ),
+        dim=0,
+        sorted=True,
+    )
+    episode_voxel_indices, episode_counts = torch.unique(
+        voxel_episode_pairs[:, :3],
+        dim=0,
+        sorted=True,
+        return_counts=True,
+    )
+
+    if not torch.equal(episode_voxel_indices, voxel_indices):
+        raise RuntimeError("Episode-count voxels must match visited voxels.")
+
+    episode_frequencies = episode_counts.to(dtype=torch.float64) / num_episodes
+
     minimum_voxel_indices = voxel_indices.min(dim=0).values
     maximum_voxel_indices = voxel_indices.max(dim=0).values
     grid_shape_values = maximum_voxel_indices - minimum_voxel_indices + 1
@@ -141,6 +207,7 @@ def compute_workspace_coverage(
         arm=trajectory.arm,
         link_name=trajectory.link_name,
         num_points=num_points,
+        num_episodes=num_episodes,
         voxel_size=float(voxel_size),
         minimum_xyz=_as_vector3(minimums),
         voxel_origin_xyz=_as_vector3(voxel_origin),
@@ -155,6 +222,8 @@ def compute_workspace_coverage(
         occupied_volume=occupied_volume,
         voxel_indices=voxel_indices,
         visit_counts=visit_counts,
+        episode_counts=episode_counts,
+        episode_frequencies=episode_frequencies,
     )
 
 
@@ -207,6 +276,11 @@ class WorkspaceCoverageAccumulator:
         self._minimums: Tensor | None = None
         self._maximums: Tensor | None = None
         self._visit_counts: dict[tuple[int, int, int], int] = {}
+        self._episode_indices: set[int] = set()
+        self._episode_ids_by_voxel: dict[
+            tuple[int, int, int],
+            set[int],
+        ] = {}
 
     def update(self, trajectory: ToolTrajectory) -> None:
         """Add one trajectory batch to the aggregate."""
@@ -231,6 +305,12 @@ class WorkspaceCoverageAccumulator:
 
         if not torch.isfinite(values).all().item():
             raise ValueError("Trajectory positions must contain only finite values.")
+
+        episode_indices = _trajectory_episode_indices(
+            trajectory,
+            num_points=int(values.shape[0]),
+        )
+        self._episode_indices.update(int(index) for index in episode_indices.tolist())
 
         batch_minimums = values.min(dim=0).values
         batch_maximums = values.max(dim=0).values
@@ -270,6 +350,26 @@ class WorkspaceCoverageAccumulator:
             key = (int(index[0]), int(index[1]), int(index[2]))
             self._visit_counts[key] = self._visit_counts.get(key, 0) + int(count)
 
+        voxel_episode_pairs = torch.unique(
+            torch.cat(
+                (
+                    point_voxel_indices,
+                    episode_indices.unsqueeze(dim=1),
+                ),
+                dim=1,
+            ),
+            dim=0,
+            sorted=True,
+        )
+
+        for x_index, y_index, z_index, episode_index in voxel_episode_pairs.tolist():
+            key = (
+                int(x_index),
+                int(y_index),
+                int(z_index),
+            )
+            self._episode_ids_by_voxel.setdefault(key, set()).add(int(episode_index))
+
     def finalize(self) -> WorkspaceCoverage:
         """Build immutable aggregate coverage statistics."""
         if self._num_points == 0 or self._minimums is None or self._maximums is None:
@@ -285,6 +385,12 @@ class WorkspaceCoverageAccumulator:
             [count for _, count in ordered_counts],
             dtype=torch.int64,
         )
+        episode_counts = torch.tensor(
+            [len(self._episode_ids_by_voxel[index]) for index, _ in ordered_counts],
+            dtype=torch.int64,
+        )
+        num_episodes = len(self._episode_indices)
+        episode_frequencies = episode_counts.to(dtype=torch.float64) / num_episodes
 
         minimum_voxel_indices = voxel_indices.min(dim=0).values
         maximum_voxel_indices = voxel_indices.max(dim=0).values
@@ -304,6 +410,7 @@ class WorkspaceCoverageAccumulator:
             arm=self.arm,
             link_name=self.link_name,
             num_points=self._num_points,
+            num_episodes=num_episodes,
             voxel_size=self.voxel_size,
             minimum_xyz=_as_vector3(self._minimums),
             voxel_origin_xyz=self.voxel_origin_xyz,
@@ -318,4 +425,6 @@ class WorkspaceCoverageAccumulator:
             occupied_volume=occupied_volume,
             voxel_indices=voxel_indices,
             visit_counts=visit_counts,
+            episode_counts=episode_counts,
+            episode_frequencies=episode_frequencies,
         )
