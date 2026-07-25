@@ -572,8 +572,8 @@ def save_interactive_workspace_coverage_heatmap(
     )
 
     visit_color_values: list[list[int]] = []
+    log_visit_color_values: list[list[float]] = []
     episode_count_color_values: list[list[int]] = []
-    episode_frequency_color_values: list[list[float]] = []
 
     for column, coverage in enumerate(
         coverages,
@@ -588,20 +588,17 @@ def save_interactive_workspace_coverage_heatmap(
             device="cpu",
             dtype=torch.int64,
         )
-        episode_frequencies = coverage.episode_frequencies.detach().to(
-            device="cpu",
-            dtype=torch.float64,
-        )
+        log_visits = torch.log1p(visit_counts.to(dtype=torch.float64))
 
         visit_color_values.append(visit_counts.tolist())
+        log_visit_color_values.append(log_visits.tolist())
         episode_count_color_values.append(episode_counts.tolist())
-        episode_frequency_color_values.append(episode_frequencies.tolist())
 
         customdata = torch.stack(
             (
                 visit_counts.to(dtype=torch.float64),
+                log_visits,
                 episode_counts.to(dtype=torch.float64),
-                episode_frequencies,
             ),
             dim=1,
         )
@@ -626,8 +623,8 @@ def save_interactive_workspace_coverage_heatmap(
                     "<br>y=%{y:.4f} m"
                     "<br>z=%{z:.4f} m"
                     "<br>visits=%{customdata[0]:.0f}"
-                    "<br>episodes=%{customdata[1]:.0f}"
-                    "<br>episode frequency=%{customdata[2]:.3f}"
+                    "<br>log visits=%{customdata[1]:.3f}"
+                    "<br>episodes=%{customdata[2]:.0f}"
                     "<extra></extra>"
                 ),
             ),
@@ -652,6 +649,21 @@ def save_interactive_workspace_coverage_heatmap(
             ],
         },
         {
+            "label": "Log visits",
+            "method": "update",
+            "args": [
+                {
+                    "marker.color": log_visit_color_values,
+                },
+                {
+                    "coloraxis.colorbar.title.text": "Log visits",
+                    "coloraxis.cauto": True,
+                    "coloraxis.cmin": None,
+                    "coloraxis.cmax": None,
+                },
+            ],
+        },
+        {
             "label": "Episode count",
             "method": "update",
             "args": [
@@ -663,21 +675,6 @@ def save_interactive_workspace_coverage_heatmap(
                     "coloraxis.cauto": True,
                     "coloraxis.cmin": None,
                     "coloraxis.cmax": None,
-                },
-            ],
-        },
-        {
-            "label": "Episode frequency",
-            "method": "update",
-            "args": [
-                {
-                    "marker.color": episode_frequency_color_values,
-                },
-                {
-                    "coloraxis.colorbar.title.text": "Episode frequency",
-                    "coloraxis.cauto": False,
-                    "coloraxis.cmin": 0.0,
-                    "coloraxis.cmax": 1.0,
                 },
             ],
         },

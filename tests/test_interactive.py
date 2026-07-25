@@ -538,7 +538,7 @@ def test_save_interactive_workspace_coverage_heatmap(
     assert captured["kwargs"]["auto_open"] is False
 
 
-def test_coverage_heatmap_adds_episode_metric_selector(
+def test_coverage_heatmap_adds_log_visit_metric_selector(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -549,12 +549,13 @@ def test_coverage_heatmap_adds_episode_metric_selector(
                 [0.1, 0.0, 0.0],
                 [0.3, 0.0, 0.0],
                 [0.3, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
             ],
             dtype=torch.float64,
         ),
         arm="left",
         episode_indices=torch.tensor(
-            [0, 1, 1, 1],
+            [0, 1, 1, 1, 1],
             dtype=torch.int64,
         ),
     )
@@ -580,13 +581,35 @@ def test_coverage_heatmap_adds_episode_metric_selector(
 
     save_interactive_workspace_coverage_heatmap(
         (coverage,),
-        tmp_path / "episode-metrics.html",
+        tmp_path / "log-visit-metrics.html",
     )
 
     figure = captured["figure"]
     marker_trace = figure.data[0]
 
+    log_visits = torch.log1p(coverage.visit_counts.to(dtype=torch.float64))
+
     assert tuple(marker_trace.marker.color) == tuple(coverage.visit_counts.tolist())
+
+    expected_customdata = torch.stack(
+        (
+            coverage.visit_counts.to(dtype=torch.float64),
+            log_visits,
+            coverage.episode_counts.to(dtype=torch.float64),
+        ),
+        dim=1,
+    )
+    torch.testing.assert_close(
+        torch.tensor(
+            marker_trace.customdata,
+            dtype=torch.float64,
+        ),
+        expected_customdata,
+    )
+
+    assert "visits=%{customdata[0]:.0f}" in marker_trace.hovertemplate
+    assert "log visits=%{customdata[1]:.3f}" in marker_trace.hovertemplate
+    assert "episodes=%{customdata[2]:.0f}" in marker_trace.hovertemplate
 
     menus = figure.layout.updatemenus
     assert len(menus) == 1
@@ -594,27 +617,23 @@ def test_coverage_heatmap_adds_episode_metric_selector(
     buttons = menus[0].buttons
     assert [button.label for button in buttons] == [
         "Visits",
+        "Log visits",
         "Episode count",
-        "Episode frequency",
     ]
 
     visits_update = buttons[0].args[0]
-    episode_count_update = buttons[1].args[0]
-    episode_frequency_update = buttons[2].args[0]
+    log_visits_update = buttons[1].args[0]
+    episode_count_update = buttons[2].args[0]
 
     assert visits_update["marker.color"] == [coverage.visit_counts.tolist()]
+    assert log_visits_update["marker.color"] == [log_visits.tolist()]
     assert episode_count_update["marker.color"] == [coverage.episode_counts.tolist()]
-    assert episode_frequency_update["marker.color"] == [
-        coverage.episode_frequencies.tolist()
-    ]
 
     assert buttons[0].args[1]["coloraxis.colorbar.title.text"] == "Visits"
     assert buttons[0].args[1]["coloraxis.cauto"] is True
 
-    assert buttons[1].args[1]["coloraxis.colorbar.title.text"] == "Episodes"
+    assert buttons[1].args[1]["coloraxis.colorbar.title.text"] == "Log visits"
     assert buttons[1].args[1]["coloraxis.cauto"] is True
 
-    assert buttons[2].args[1]["coloraxis.colorbar.title.text"] == "Episode frequency"
-    assert buttons[2].args[1]["coloraxis.cauto"] is False
-    assert buttons[2].args[1]["coloraxis.cmin"] == 0.0
-    assert buttons[2].args[1]["coloraxis.cmax"] == 1.0
+    assert buttons[2].args[1]["coloraxis.colorbar.title.text"] == "Episodes"
+    assert buttons[2].args[1]["coloraxis.cauto"] is True

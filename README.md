@@ -121,19 +121,18 @@ For larger selections, generate a coverage-only heatmap while loading episodes i
 
 - loads at most the configured number of episodes per batch
 - computes left and right tool positions for each batch
-- incrementally accumulates voxel visit counts
+- incrementally accumulates raw voxel visit counts
 - counts the distinct episodes that entered each voxel
-- computes normalized episode frequency for every occupied voxel
 - retains aggregate statistics instead of every trajectory point
 - writes a self-contained interactive HTML heatmap
 
 The generated heatmap includes a metric selector with three views:
 
 - **Visits** — total dataset frames that entered each voxel
+- **Log visits** — `log1p(visits)`, which compresses the dynamic range so rarely and moderately visited regions remain visible alongside heavily visited regions
 - **Episode count** — number of distinct selected episodes that entered each voxel
-- **Episode frequency** — episode count divided by the total selected episodes, normalized from `0` to `1`
 
-Hover information shows all three metrics for each voxel. Visit and episode-count colour scales adjust automatically, while episode frequency always uses a fixed `0–1` scale.
+Hover information shows the raw visit count, its `log1p` value, and the distinct episode count for each voxel. Each metric uses its own automatically adjusted colour range. The logarithmic transform affects only the displayed colours; the underlying raw visit counts remain unchanged.
 
 The aggregated view intentionally omits individual trajectory lines and playback. This keeps memory usage and HTML size practical when analysing tens, hundreds, or all dataset episodes.
 
