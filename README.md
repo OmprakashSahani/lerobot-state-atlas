@@ -17,7 +17,8 @@ LeRobot State Atlas loads robot state trajectories, applies forward kinematics u
 - Hover over voxels to inspect coordinates and visit counts.
 - Rotate, zoom, and pan interactive 3D workspace views during playback.
 - Automatically rotate the shared workspace while trajectories play.
-- Play, pause, and reset trajectory playback.
+- Play, pause, reset, and seek through trajectory playback.
+- Scrub through frames with an interactive playback timeline.
 - Animate trajectories using the dataset's native FPS.
 - Preserve episode boundaries without drawing false connections.
 
@@ -104,10 +105,12 @@ The interactive visualization provides:
 - synchronized automatic camera rotation during playback
 - an Auto rotate On/Off control
 - Play/Pause and Reset controls
-- a live frame counter
+- an interactive timeline for seeking to any frame
+- automatic pause and resume behavior while scrubbing
+- a live frame and elapsed-time display
 - playback using the dataset's reported FPS
 
-The visited-voxel heatmap remains visible while the trajectories are progressively drawn. Automatic rotation pauses during manual camera interaction and resumes from the updated camera position after release.
+The visited-voxel heatmap remains visible while the trajectories are progressively drawn. The timeline can be scrubbed while playback is running or paused; playback resumes after release only when it was already running. Automatic rotation pauses during manual camera interaction and resumes from the updated camera position after release.
 
 ## Aggregate many episodes
 
@@ -185,6 +188,7 @@ At a voxel size of `0.020 m` and provisional `0.8 m` lateral arm spacing, the ge
 - 423 arm-specific occupied-voxel entries
 - one shared dual-arm world-space scene
 - playback at the dataset's native 50 FPS
+- an interactive frame-seeking timeline with elapsed and total time
 - synchronized automatic camera rotation
 - manual rotation, zoom, and pan during playback
 - a self-contained offline HTML file

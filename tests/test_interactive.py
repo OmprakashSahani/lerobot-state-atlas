@@ -522,6 +522,23 @@ def test_interactive_heatmap_embeds_trajectory_playback(
     assert "lerobot-playback-reset" in script
     assert "lerobot-playback-auto-rotate" in script
     assert "Auto rotate: On" in script
+    assert "lerobot-playback-timeline" in script
+    assert 'timeline.type = "range"' in script
+    assert "timeline.max = String(totalFrames)" in script
+    assert "function formatPlaybackTime(frame)" in script
+    assert "function updatePlaybackStatus()" in script
+    assert "function seekPlayback(frame)" in script
+    assert "function startPlayback()" in script
+    assert 'toggleButton.textContent = "Pause"' in script
+    assert "timer = window.setInterval(" in script
+    assert "advancePlayback," in script
+    assert "startRotation();" in script
+    assert "function beginSeek()" in script
+    assert "function finishSeek()" in script
+    assert 'timeline.addEventListener("input"' in script
+    assert '"pointerdown",\n        beginSeek' in script
+    assert '"change",\n        finishSeek' in script
+    assert "resumeAfterSeek" in script
     assert "window.requestAnimationFrame(rotateScenes)" in script
     assert "Plotly.relayout(graph, layoutUpdate)" in script
     assert "angularSpeed = 0.35" in script
