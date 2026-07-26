@@ -159,6 +159,7 @@ def _trajectory_playback_script(
     controls.style.display = "flex";
     controls.style.alignItems = "center";
     controls.style.justifyContent = "center";
+    controls.style.flexWrap = "wrap";
     controls.style.gap = "10px";
     controls.style.margin = "12px 0 4px";
 
@@ -177,13 +178,24 @@ def _trajectory_playback_script(
     rotationButton.type = "button";
     rotationButton.textContent = "Auto rotate: On";
 
+    const timeline = document.createElement("input");
+    timeline.id = "lerobot-playback-timeline";
+    timeline.type = "range";
+    timeline.min = "0";
+    timeline.step = "1";
+    timeline.value = "0";
+    timeline.setAttribute("aria-label", "Playback timeline");
+    timeline.style.width = "320px";
+
     const frameLabel = document.createElement("span");
     frameLabel.id = "lerobot-playback-frame";
     frameLabel.textContent = "Frame 0";
+    frameLabel.style.minWidth = "230px";
 
     controls.appendChild(toggleButton);
     controls.appendChild(resetButton);
     controls.appendChild(rotationButton);
+    controls.appendChild(timeline);
     controls.appendChild(frameLabel);
     graph.parentNode.insertBefore(controls, graph);
 
@@ -196,10 +208,14 @@ def _trajectory_playback_script(
         0
     );
 
+    timeline.max = String(totalFrames);
+
     let currentFrame = 0;
     let renderedFrame = 0;
     let timer = null;
     let isInteracting = false;
+    let isSeeking = false;
+    let resumeAfterSeek = false;
     let autoRotateEnabled = true;
     let rotationAnimationFrame = null;
     let previousRotationTime = null;
@@ -238,6 +254,42 @@ def _trajectory_playback_script(
                 trajectory.x.length
             )
         );
+    }}
+
+    function formatPlaybackTime(frame) {{
+        return (
+            frame * frameIntervalMs / 1000
+        ).toFixed(2) + " s";
+    }}
+
+    function updatePlaybackStatus() {{
+        const displayedFrame = Math.min(
+            Math.max(currentFrame, 0),
+            totalFrames
+        );
+
+        timeline.value = String(displayedFrame);
+        frameLabel.textContent =
+            "Frame " + displayedFrame +
+            " / " + totalFrames +
+            " · " + formatPlaybackTime(displayedFrame) +
+            " / " + formatPlaybackTime(totalFrames);
+    }}
+
+    function seekPlayback(frame) {{
+        const numericFrame = Number(frame);
+
+        if (!Number.isFinite(numericFrame)) {{
+            return;
+        }}
+
+        currentFrame = Math.min(
+            totalFrames,
+            Math.max(0, Math.round(numericFrame))
+        );
+
+        synchronizePlayback();
+        updatePlaybackStatus();
     }}
 
     function synchronizePlayback() {{
@@ -336,8 +388,8 @@ def _trajectory_playback_script(
     function resetPlayback() {{
         stopPlayback();
         currentFrame = 0;
-        frameLabel.textContent = "Frame 0";
         synchronizePlayback();
+        updatePlaybackStatus();
     }}
 
     function advancePlayback() {{
@@ -370,12 +422,55 @@ def _trajectory_playback_script(
         }}
 
         currentFrame += 1;
-        frameLabel.textContent =
-            "Frame " + Math.min(currentFrame, totalFrames);
+        updatePlaybackStatus();
 
         if (currentFrame >= totalFrames) {{
             stopPlayback();
         }}
+    }}
+
+    function startPlayback() {{
+        if (
+            timer !== null ||
+            currentFrame >= totalFrames
+        ) {{
+            return;
+        }}
+
+        toggleButton.textContent = "Pause";
+        timer = window.setInterval(
+            advancePlayback,
+            frameIntervalMs
+        );
+        startRotation();
+    }}
+
+    function beginSeek() {{
+        if (isSeeking) {{
+            return;
+        }}
+
+        isSeeking = true;
+        resumeAfterSeek = timer !== null;
+        stopPlayback();
+    }}
+
+    function finishSeek() {{
+        if (!isSeeking) {{
+            return;
+        }}
+
+        seekPlayback(timeline.value);
+        isSeeking = false;
+
+        if (
+            resumeAfterSeek &&
+            currentFrame < totalFrames
+        ) {{
+            startPlayback();
+        }}
+
+        resumeAfterSeek = false;
     }}
 
     function refreshCameraStates() {{
@@ -465,6 +560,34 @@ def _trajectory_playback_script(
             stopRotation();
         }}
     }});
+
+    timeline.addEventListener(
+        "pointerdown",
+        beginSeek
+    );
+
+    timeline.addEventListener("input", () => {{
+        if (!isSeeking) {{
+            beginSeek();
+        }}
+
+        seekPlayback(timeline.value);
+    }});
+
+    timeline.addEventListener(
+        "change",
+        finishSeek
+    );
+
+    window.addEventListener(
+        "pointerup",
+        finishSeek
+    );
+
+    window.addEventListener(
+        "pointercancel",
+        finishSeek
+    );
 
     resetPlayback();
 }})();
