@@ -60,6 +60,8 @@ def build_state_batch(dataset: Any) -> StateBatch:
 def load_state_batch(
     repo_id: str,
     episodes: Sequence[int],
+    *,
+    revision: str | None = None,
 ) -> StateBatch:
     """Load batched state and action data without decoding videos."""
     if not episodes:
@@ -70,6 +72,7 @@ def load_state_batch(
     dataset = LeRobotDataset(
         repo_id,
         episodes=list(episodes),
+        revision=revision,
         download_videos=False,
     )
 
@@ -81,6 +84,7 @@ def iter_state_batches(
     episodes: Sequence[int],
     *,
     episode_batch_size: int,
+    revision: str | None = None,
 ) -> Iterator[StateBatch]:
     """Load selected episodes in bounded batches."""
     if not episodes:
@@ -93,7 +97,14 @@ def iter_state_batches(
 
     for start in range(0, len(normalized_episodes), episode_batch_size):
         episode_chunk = normalized_episodes[start : start + episode_batch_size]
-        yield load_state_batch(
-            repo_id,
-            episodes=episode_chunk,
-        )
+        if revision is None:
+            yield load_state_batch(
+                repo_id,
+                episodes=episode_chunk,
+            )
+        else:
+            yield load_state_batch(
+                repo_id,
+                episodes=episode_chunk,
+                revision=revision,
+            )

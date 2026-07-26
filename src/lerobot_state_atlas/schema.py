@@ -33,8 +33,9 @@ class DatasetSummary:
     """High-level summary of a LeRobot dataset."""
 
     repo_id: str
-    revision: str
-    codebase_version: str
+    requested_revision: str
+    resolved_revision: str
+    lerobot_codebase_version: str
     robot_type: str | None
     fps: float
     total_episodes: int

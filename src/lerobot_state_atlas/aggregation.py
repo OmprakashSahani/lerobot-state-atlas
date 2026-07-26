@@ -36,6 +36,7 @@ def aggregate_workspace_coverages(
     voxel_size: float,
     episode_batch_size: int,
     arm_transforms: Mapping[str, RigidTransform] | None = None,
+    revision: str | None = None,
 ) -> WorkspaceAggregation:
     """Aggregate dual-arm workspace coverage in bounded episode batches."""
     if not episodes:
@@ -78,11 +79,22 @@ def aggregate_workspace_coverages(
     num_batches = 0
     num_frames = 0
 
-    for batch in iter_state_batches(
-        repo_id,
-        normalized_episodes,
-        episode_batch_size=episode_batch_size,
-    ):
+    batch_iterator = (
+        iter_state_batches(
+            repo_id,
+            normalized_episodes,
+            episode_batch_size=episode_batch_size,
+        )
+        if revision is None
+        else iter_state_batches(
+            repo_id,
+            normalized_episodes,
+            episode_batch_size=episode_batch_size,
+            revision=revision,
+        )
+    )
+
+    for batch in batch_iterator:
         num_batches += 1
         num_frames += int(batch.states.shape[0])
 

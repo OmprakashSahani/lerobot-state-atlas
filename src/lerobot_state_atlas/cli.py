@@ -8,6 +8,10 @@ from rich.table import Table
 from lerobot_state_atlas.aggregation import (
     aggregate_workspace_coverages,
 )
+from lerobot_state_atlas.browser_data import (
+    export_browser_data,
+    validate_browser_data,
+)
 from lerobot_state_atlas.coverage import (
     compute_workspace_coverage,
 )
@@ -66,10 +70,11 @@ def display_dataset_summary(summary: DatasetSummary) -> None:
     overview.add_column("Value")
 
     overview.add_row("Repository", summary.repo_id)
-    overview.add_row("Revision", summary.revision)
+    overview.add_row("Requested revision", summary.requested_revision)
+    overview.add_row("Resolved revision", summary.resolved_revision)
     overview.add_row(
-        "LeRobot version",
-        summary.codebase_version,
+        "LeRobot codebase version",
+        summary.lerobot_codebase_version,
     )
     overview.add_row(
         "Robot type",
@@ -214,6 +219,7 @@ def visualize_workspace(
         batch = load_state_batch(
             repo_id,
             episodes=episode,
+            revision=summary.resolved_revision,
         )
 
         console.print(f"Loading robot model from [bold]{urdf_path}[/bold]...")
@@ -340,6 +346,7 @@ def interactive_workspace(
         batch = load_state_batch(
             repo_id,
             episodes=episode,
+            revision=summary.resolved_revision,
         )
 
         console.print(f"Loading robot model from [bold]{urdf_path}[/bold]...")
@@ -536,6 +543,7 @@ def aggregate_workspace(
             voxel_size=voxel_size,
             episode_batch_size=episode_batch_size,
             arm_transforms=arm_transforms,
+            revision=summary.resolved_revision,
         )
 
         result = save_interactive_workspace_coverage_heatmap(
@@ -568,6 +576,158 @@ def aggregate_workspace(
     console.print(
         "[yellow]Coordinate note:[/yellow] "
         "left and right arms are shown in one shared world frame."
+    )
+
+
+@app.command("export-browser-data")
+def export_browser_data_command(
+    repo_id: str = typer.Argument(
+        ...,
+        help="Hugging Face repository ID of the LeRobot dataset.",
+    ),
+    urdf_path: Path = typer.Option(
+        ...,
+        "--urdf",
+        help="Path to the pinned TRLC-DK1 follower URDF.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    urdf_upstream_identity_path: Path = typer.Option(
+        ...,
+        "--urdf-upstream-identity",
+        help="Text file containing the pinned upstream URDF commit identity.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    dataset_revision: str | None = typer.Option(
+        None,
+        "--dataset-revision",
+        help=(
+            "Dataset tag, branch, or commit to resolve before export. "
+            "Defaults to LeRobot's normal codebase-version ref."
+        ),
+    ),
+    episode_start: int = typer.Option(
+        0,
+        "--episode-start",
+        help="First coverage episode index.",
+    ),
+    episode_end: int = typer.Option(
+        ...,
+        "--episode-end",
+        help="Last coverage episode index, inclusive.",
+    ),
+    trajectory_episode: list[int] = typer.Option(
+        [],
+        "--trajectory-episode",
+        help="Episode to include in the optional trajectory payload. Repeatable.",
+    ),
+    episode_batch_size: int = typer.Option(
+        32,
+        "--episode-batch-size",
+        help="Maximum number of coverage episodes loaded per batch.",
+    ),
+    voxel_size: float = typer.Option(
+        0.02,
+        "--voxel-size",
+        help="Workspace voxel edge length in metres.",
+    ),
+    arm_spacing: float = typer.Option(
+        0.8,
+        "--arm-spacing",
+        help="Provisional lateral distance between arm bases in metres.",
+    ),
+    bundle_id: str = typer.Option(
+        ...,
+        "--bundle-id",
+        help="Stable identifier for this browser-data bundle.",
+    ),
+    output_path: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Destination browser-data directory.",
+    ),
+) -> None:
+    """Export deterministic, versioned data for the browser viewer."""
+    try:
+        if episode_start < 0:
+            raise ValueError("Episode start must be nonnegative.")
+        if episode_end < episode_start:
+            raise ValueError(
+                "Episode end must be greater than or equal to episode start."
+            )
+        if episode_batch_size <= 0:
+            raise ValueError("Episode batch size must be greater than zero.")
+        if not isfinite(voxel_size) or voxel_size <= 0:
+            raise ValueError("Voxel size must be finite and greater than zero.")
+        if not isfinite(arm_spacing) or arm_spacing <= 0:
+            raise ValueError("Arm spacing must be finite and greater than zero.")
+        if any(value < 0 for value in trajectory_episode):
+            raise ValueError("Trajectory episode indices must be nonnegative.")
+        if len(set(trajectory_episode)) != len(trajectory_episode):
+            raise ValueError("Trajectory episode indices must be unique.")
+
+        upstream_identity = urdf_upstream_identity_path.read_text(
+            encoding="utf-8"
+        ).strip()
+        if not upstream_identity:
+            raise ValueError("URDF upstream identity must not be empty.")
+
+        result = export_browser_data(
+            repo_id,
+            urdf_path=urdf_path,
+            episodes=tuple(range(episode_start, episode_end + 1)),
+            trajectory_episodes=tuple(sorted(trajectory_episode)),
+            episode_batch_size=episode_batch_size,
+            voxel_size=voxel_size,
+            arm_spacing=arm_spacing,
+            output_path=output_path,
+            bundle_id=bundle_id,
+            urdf_upstream_identity=upstream_identity,
+            repository_path=Path.cwd(),
+            dataset_revision=dataset_revision,
+        )
+    except Exception as error:
+        console.print(f"[red]Failed to export browser data:[/red] {error}")
+        raise typer.Exit(code=1) from error
+
+    console.print(f"Exported browser data to [bold]{result.output_path}[/bold]")
+    console.print(f"Dataset frames: {result.dataset_frame_count:,}")
+    console.print(f"Dual-arm tool-point visits: {result.tool_point_visit_count:,}")
+    console.print(f"Arm-specific voxel entries: {result.arm_voxel_entry_count:,}")
+    console.print(f"Unique shared grid cells: {result.unique_shared_grid_cell_count:,}")
+
+
+@app.command("validate-browser-data")
+def validate_browser_data_command(
+    path: Path = typer.Argument(
+        ...,
+        help="Browser-data bundle directory.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+    ),
+) -> None:
+    """Validate a browser-data v1 bundle and its checksums."""
+    try:
+        manifest = validate_browser_data(path)
+    except Exception as error:
+        console.print(f"[red]Invalid browser data:[/red] {error}")
+        raise typer.Exit(code=1) from error
+
+    console.print(
+        f"Valid browser-data bundle [bold]{manifest['bundleId']}[/bold] "
+        f"(schema {manifest['schema']['major']}."
+        f"{manifest['schema']['minor']})."
     )
 
 

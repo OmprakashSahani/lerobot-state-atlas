@@ -225,13 +225,102 @@ Check the Git diff for whitespace errors:
 
     git diff --check
 
+## Browser-data export
+
+The web application reads deterministic browser-data schema v1.0 bundles. It
+does not run LeRobot, PyTorch, URDF parsing, or forward kinematics at request
+time.
+
+Generate the pinned demo bundle:
+
+    uv run lerobot-state-atlas export-browser-data \
+      DreamMachines/actuator_unboxing_4h_diverse \
+      --urdf .cache/robot-models/trlc-dk1/TRLC-DK1-Follower.urdf \
+      --urdf-upstream-identity .cache/robot-models/trlc-dk1/UPSTREAM_COMMIT \
+      --dataset-revision v3.0 \
+      --episode-start 0 \
+      --episode-end 9 \
+      --trajectory-episode 0 \
+      --trajectory-episode 1 \
+      --episode-batch-size 4 \
+      --voxel-size 0.02 \
+      --arm-spacing 0.8 \
+      --bundle-id demo-v1 \
+      --output apps/web/public/atlas-data/demo-v1
+
+Validate any bundle and its payload checksums:
+
+    uv run lerobot-state-atlas validate-browser-data \
+      apps/web/public/atlas-data/demo-v1
+
+The exporter first resolves `--dataset-revision` through the Hugging Face Hub
+to a full immutable dataset commit SHA. That SHA is passed explicitly to every
+LeRobot metadata and state read. The manifest records the requested ref and
+resolved commit separately, along with the dataset metadata codebase version
+and installed LeRobot package version.
+
+The exporter writes deterministic JSON into a temporary sibling directory,
+validates the complete bundle, and atomically installs it. Coverage and
+trajectory payloads are deterministic for identical pinned dataset, URDF,
+parameters, and exporter source. No timestamp is stored. Manifest provenance
+records the repository HEAD separately from a dirty-working-tree flag, so an
+uncommitted exporter is never represented as fully identified by HEAD alone.
+The dirty check includes modified, staged, and non-ignored untracked files;
+ignored output such as `node_modules` and `.next` is excluded.
+
+The included demo uses episodes 0 through 9 for coverage and episodes 0 and 1
+for the optional, currently unloaded trajectory payload. Its files are:
+
+- `manifest.json`: 2,457 bytes uncompressed; 1,343 bytes gzip-compressed
+- `coverage.json`: 26,564 bytes uncompressed; 7,638 bytes gzip-compressed
+- `trajectories.json`: 139,152 bytes uncompressed; 57,461 bytes gzip-compressed
+- total: 168,173 bytes uncompressed; 66,442 bytes gzip-compressed
+
+Compressed sizes use gzip level 9 and may vary slightly with the deployment
+CDN. The viewer loads only the manifest and coverage payload.
+
+## Web application
+
+The production-oriented Next.js application lives in `apps/web` and remains
+self-contained:
+
+    cd apps/web
+    npm ci
+    npm run lint
+    npm run typecheck
+    npm test
+    npm run build
+
+Run it locally with:
+
+    npm run dev
+
+Then open `http://localhost:3000`, `/methodology`, or `/viewer/demo`.
+
+For Vercel, import this Git repository and set the project root directory to
+`apps/web`. No environment variables, API routes, Python runtime, dataset
+download, or data-generation build step is required. Versioned atlas payloads
+receive immutable cache headers; static routes receive practical security
+headers from `next.config.ts`.
+
+Production atlas bundle directories are immutable. Once a path such as
+`/atlas-data/demo-v1/` has been deployed, its files must never be replaced or
+mutated. Any manifest, schema, provenance, coverage, or trajectory change must
+be published under a new bundle/version directory and referenced by the
+application through that new URL. Development responses use `no-store` so
+local schema and bundle iteration cannot reuse an older immutable browser
+response.
+
 ## Current validation status
 
-- 138 tests passed
+- 168 Python tests passed
+- 15 frontend tests passed
 - Ruff lint passed
 - Ruff formatting check passed
+- Frontend lint and TypeScript checks passed
+- Next.js production build passed
 - `git diff --check` passed
 
 ## License
 
-A project license has not yet been added.
+See [LICENSE](LICENSE).

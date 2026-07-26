@@ -222,3 +222,8 @@ __marimo__/
 
 # Generated visualizations
 artifacts/
+
+# Web application dependencies and build output
+apps/web/node_modules/
+apps/web/.next/
+apps/web/*.tsbuildinfo

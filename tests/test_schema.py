@@ -33,8 +33,9 @@ def test_feature_summary_from_feature_without_component_names() -> None:
 def test_dataset_summary_is_immutable() -> None:
     summary = DatasetSummary(
         repo_id="organization/dataset",
-        revision="v3.0",
-        codebase_version="v3.0",
+        requested_revision="v3.0",
+        resolved_revision="a" * 40,
+        lerobot_codebase_version="v3.0",
         robot_type="test_robot",
         fps=50.0,
         total_episodes=10,
