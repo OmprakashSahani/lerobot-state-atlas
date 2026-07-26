@@ -115,12 +115,15 @@ For larger selections, generate a coverage-only heatmap while loading episodes i
       --episode-end 99 \
       --episode-batch-size 10 \
       --voxel-size 0.02 \
+      --arm-spacing 0.8 \
       --output artifacts/episodes-0-99-aggregated-workspace.html
 
 `--episode-end` is inclusive. The command:
 
 - loads at most the configured number of episodes per batch
 - computes left and right tool positions for each batch
+- applies configurable arm-base transforms after forward kinematics
+- voxelizes both arms in one shared world coordinate frame
 - incrementally accumulates raw voxel visit counts
 - counts the distinct episodes that entered each voxel
 - retains aggregate statistics instead of every trajectory point
@@ -134,6 +137,13 @@ The generated heatmap includes a metric selector with three views:
 
 Hover information shows the raw visit count, its `log1p` value, and the distinct episode count for each voxel. Each metric uses its own automatically adjusted colour range. The logarithmic transform affects only the displayed colours; the underlying raw visit counts remain unchanged.
 
+The default shared-frame placement uses zero arm rotations and positions the arm bases laterally along the world Y axis:
+
+- left base: `(0, +arm_spacing / 2, 0)`
+- right base: `(0, -arm_spacing / 2, 0)`
+
+The default `--arm-spacing 0.8` value is configurable. It is an approximate starting assumption rather than a confirmed robot calibration.
+
 The aggregated view intentionally omits individual trajectory lines and playback. This keeps memory usage and HTML size practical when analysing tens, hundreds, or all dataset episodes.
 
 A real validation using episodes 0 through 9 produced:
@@ -141,14 +151,17 @@ A real validation using episodes 0 through 9 produced:
 - 10 episodes processed across 4 bounded batches
 - 5,124 dataset frames
 - 10,248 dual-arm tool points
-- 1,224 occupied voxels at a `0.020 m` voxel size
-- a 4.7 MB self-contained HTML visualization
+- 1,224 arm-specific occupied-voxel entries at a `0.020 m` voxel size
+- a shared scene using `0.8 m` provisional lateral arm spacing
+- a 4.8 MB self-contained HTML visualization
 
 ## Coordinate frames
 
-The left and right panels use their respective local `base_link` frames.
+The `visualize-workspace` and `interactive-workspace` commands retain separate left and right panels using their respective local `base_link` frames. Those panels must not be interpreted as sharing one common world coordinate frame.
 
-They must not be interpreted as sharing one common world coordinate frame. This note is displayed in both the CLI output and generated interactive HTML.
+The `aggregate-workspace` command instead applies configurable rigid arm-base transforms after forward kinematics and before voxelization. It renders the transformed left and right coverage in one shared world-space 3D scene.
+
+The current default shared-frame convention places the bases laterally along world Y with zero roll, pitch, and yaw. The spacing is configurable through `--arm-spacing`; its default `0.8 m` value is provisional and should not be treated as calibrated physical geometry.
 
 ## Example validation
 

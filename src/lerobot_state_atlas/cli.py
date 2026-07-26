@@ -22,6 +22,7 @@ from lerobot_state_atlas.trajectory import (
     build_trlc_dk1_joint_component_map,
     compute_tool_trajectory,
 )
+from lerobot_state_atlas.transforms import RigidTransform
 from lerobot_state_atlas.urdf import load_robot_model
 from lerobot_state_atlas.visualization import (
     save_workspace_plot,
@@ -417,6 +418,14 @@ def aggregate_workspace(
         "--voxel-size",
         help="Workspace voxel edge length in metres.",
     ),
+    arm_spacing: float = typer.Option(
+        0.8,
+        "--arm-spacing",
+        help=(
+            "Lateral distance in metres between the left and right "
+            "arm bases in the shared world frame."
+        ),
+    ),
     output_path: Path = typer.Option(
         Path("aggregated-workspace.html"),
         "--output",
@@ -442,6 +451,9 @@ def aggregate_workspace(
 
         if not isfinite(voxel_size) or voxel_size <= 0.0:
             raise ValueError("Voxel size must be finite and greater than zero.")
+
+        if not isfinite(arm_spacing) or arm_spacing <= 0.0:
+            raise ValueError("Arm spacing must be finite and greater than zero.")
 
         console.print(f"Loading metadata for [bold]{repo_id}[/bold]...")
         summary = load_dataset_summary(repo_id)
@@ -469,6 +481,16 @@ def aggregate_workspace(
             f"in batches of {episode_batch_size}..."
         )
 
+        half_spacing = arm_spacing / 2.0
+        arm_transforms = {
+            "left": RigidTransform(
+                translation_xyz=(0.0, half_spacing, 0.0),
+            ),
+            "right": RigidTransform(
+                translation_xyz=(0.0, -half_spacing, 0.0),
+            ),
+        }
+
         aggregation = aggregate_workspace_coverages(
             repo_id,
             episodes,
@@ -476,6 +498,7 @@ def aggregate_workspace(
             model=model,
             voxel_size=voxel_size,
             episode_batch_size=episode_batch_size,
+            arm_transforms=arm_transforms,
         )
 
         result = save_interactive_workspace_coverage_heatmap(
@@ -483,8 +506,9 @@ def aggregate_workspace(
             output_path,
             title=(
                 f"TRLC-DK1 Episodes {episode_start}-{episode_end} "
-                "Aggregated Workspace Heatmap"
+                "Shared Workspace Heatmap"
             ),
+            shared_space=True,
         )
     except Exception as error:
         console.print(f"[red]Failed to aggregate workspace:[/red] {error}")
@@ -503,10 +527,10 @@ def aggregate_workspace(
     )
     console.print(f"Occupied voxels: {result.occupied_voxels:,}")
     console.print(f"Voxel size: {result.voxel_size:.3f} m")
+    console.print(f"Arm base spacing: {arm_spacing:.3f} m")
     console.print(
         "[yellow]Coordinate note:[/yellow] "
-        "left and right panels use their respective "
-        "local base_link frames."
+        "left and right arms are shown in one shared world frame."
     )
 
 

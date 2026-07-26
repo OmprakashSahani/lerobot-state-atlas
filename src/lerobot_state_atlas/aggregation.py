@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from lerobot_state_atlas.coverage import (
@@ -9,6 +9,10 @@ from lerobot_state_atlas.state import iter_state_batches
 from lerobot_state_atlas.trajectory import (
     build_trlc_dk1_joint_component_map,
     compute_tool_trajectory,
+)
+from lerobot_state_atlas.transforms import (
+    RigidTransform,
+    transform_tool_trajectory,
 )
 from lerobot_state_atlas.urdf import RobotModel
 
@@ -31,6 +35,7 @@ def aggregate_workspace_coverages(
     model: RobotModel,
     voxel_size: float,
     episode_batch_size: int,
+    arm_transforms: Mapping[str, RigidTransform] | None = None,
 ) -> WorkspaceAggregation:
     """Aggregate dual-arm workspace coverage in bounded episode batches."""
     if not episodes:
@@ -40,6 +45,26 @@ def aggregate_workspace_coverages(
         raise ValueError("Episode batch size must be greater than zero.")
 
     normalized_episodes = tuple(episodes)
+    arms = ("left", "right")
+
+    if arm_transforms is None:
+        normalized_arm_transforms = {arm: RigidTransform() for arm in arms}
+    else:
+        unknown_arms = set(arm_transforms) - set(arms)
+
+        if unknown_arms:
+            unknown = ", ".join(sorted(unknown_arms))
+            raise ValueError(f"Unknown arm transforms: {unknown}")
+
+        normalized_arm_transforms = {
+            arm: arm_transforms.get(arm, RigidTransform()) for arm in arms
+        }
+
+        if not all(
+            isinstance(transform, RigidTransform)
+            for transform in normalized_arm_transforms.values()
+        ):
+            raise TypeError("Arm transforms must be RigidTransform instances.")
 
     accumulators = {
         arm: WorkspaceCoverageAccumulator(
@@ -62,7 +87,7 @@ def aggregate_workspace_coverages(
         num_frames += int(batch.states.shape[0])
 
         for arm, accumulator in accumulators.items():
-            trajectory = compute_tool_trajectory(
+            local_trajectory = compute_tool_trajectory(
                 batch.states,
                 component_names,
                 model,
@@ -70,7 +95,11 @@ def aggregate_workspace_coverages(
                 arm=arm,
                 episode_indices=batch.episode_indices,
             )
-            accumulator.update(trajectory)
+            world_trajectory = transform_tool_trajectory(
+                local_trajectory,
+                normalized_arm_transforms[arm],
+            )
+            accumulator.update(world_trajectory)
 
     if num_batches == 0:
         raise ValueError("Episode loading produced no state batches.")

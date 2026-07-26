@@ -795,6 +795,7 @@ def test_aggregate_workspace_help() -> None:
     assert "--episode-end" in result.stdout
     assert "--episode-batch-size" in result.stdout
     assert "--voxel-size" in result.stdout
+    assert "--arm-spacing" in result.stdout
     assert "--output" in result.stdout
 
 
@@ -844,6 +845,7 @@ def test_aggregate_workspace_command(
         model: object,
         voxel_size: float,
         episode_batch_size: int,
+        arm_transforms: object,
     ) -> SimpleNamespace:
         calls["repo_id"] = repo_id
         calls["episodes"] = episodes
@@ -851,6 +853,7 @@ def test_aggregate_workspace_command(
         calls["model"] = model
         calls["voxel_size"] = voxel_size
         calls["episode_batch_size"] = episode_batch_size
+        calls["arm_transforms"] = arm_transforms
 
         return SimpleNamespace(
             coverages=coverages,
@@ -869,10 +872,12 @@ def test_aggregate_workspace_command(
         destination: Path,
         *,
         title: str,
+        shared_space: bool,
     ) -> InteractiveWorkspaceHeatmap:
         calls["coverages"] = workspace_coverages
         calls["output_path"] = destination
         calls["title"] = title
+        calls["shared_space"] = shared_space
 
         return InteractiveWorkspaceHeatmap(
             output_path=destination,
@@ -900,6 +905,8 @@ def test_aggregate_workspace_command(
             "5",
             "--episode-batch-size",
             "2",
+            "--arm-spacing",
+            "0.8",
             "--output",
             str(output_path),
         ],
@@ -911,9 +918,18 @@ def test_aggregate_workspace_command(
     assert calls["model"] is model
     assert calls["voxel_size"] == pytest.approx(0.02)
     assert calls["episode_batch_size"] == 2
+
+    arm_transforms = calls["arm_transforms"]
+
+    assert arm_transforms["left"].translation_xyz == pytest.approx((0.0, 0.4, 0.0))
+    assert arm_transforms["right"].translation_xyz == pytest.approx((0.0, -0.4, 0.0))
+    assert arm_transforms["left"].rotation_rpy == pytest.approx((0.0, 0.0, 0.0))
+    assert arm_transforms["right"].rotation_rpy == pytest.approx((0.0, 0.0, 0.0))
+
     assert calls["coverages"] is coverages
     assert calls["output_path"] == output_path
-    assert calls["title"] == ("TRLC-DK1 Episodes 2-5 Aggregated Workspace Heatmap")
+    assert calls["title"] == ("TRLC-DK1 Episodes 2-5 Shared Workspace Heatmap")
+    assert calls["shared_space"] is True
 
     assert "Saved aggregated workspace heatmap" in result.stdout
     assert "Aggregated 4 episodes across 2 batches" in result.stdout
@@ -921,4 +937,42 @@ def test_aggregate_workspace_command(
     assert "20 dual-arm tool points" in result.stdout
     assert "Occupied voxels: 7" in result.stdout
     assert "Voxel size: 0.020 m" in result.stdout
-    assert "localbase_linkframes" in compact_output(result.stdout)
+    assert "Arm base spacing: 0.800 m" in result.stdout
+    assert "sharedworldframe" in compact_output(result.stdout)
+
+
+@pytest.mark.parametrize(
+    "arm_spacing",
+    [
+        "0",
+        "-0.1",
+        "nan",
+        "inf",
+    ],
+)
+def test_aggregate_workspace_rejects_invalid_arm_spacing(
+    tmp_path: Path,
+    arm_spacing: str,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text(
+        "<robot name='test'/>",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "aggregate-workspace",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--episode-end",
+            "0",
+            "--arm-spacing",
+            arm_spacing,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Armspacingmustbefiniteandgreaterthanzero" in compact_output(result.stdout)

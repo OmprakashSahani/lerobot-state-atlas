@@ -492,6 +492,7 @@ def save_interactive_workspace_coverage_heatmap(
     output_path: str | Path,
     *,
     title: str = "Aggregated workspace coverage heatmap",
+    shared_space: bool = False,
 ) -> InteractiveWorkspaceHeatmap:
     """Save aggregated workspace coverage without trajectory data."""
     if not coverages:
@@ -560,16 +561,25 @@ def save_interactive_workspace_coverage_heatmap(
         exist_ok=True,
     )
 
-    subplot_titles = tuple(
-        f"{coverage.arm.capitalize()} {coverage.link_name}" for coverage in coverages
-    )
-
-    figure = make_subplots(
-        rows=1,
-        cols=len(coverages),
-        specs=[[{"type": "scene"} for _ in coverages]],
-        subplot_titles=subplot_titles,
-    )
+    if shared_space:
+        subplot_titles = ("Shared dual-arm workspace",)
+        figure = make_subplots(
+            rows=1,
+            cols=1,
+            specs=[[{"type": "scene"}]],
+            subplot_titles=subplot_titles,
+        )
+    else:
+        subplot_titles = tuple(
+            f"{coverage.arm.capitalize()} {coverage.link_name}"
+            for coverage in coverages
+        )
+        figure = make_subplots(
+            rows=1,
+            cols=len(coverages),
+            specs=[[{"type": "scene"} for _ in coverages]],
+            subplot_titles=subplot_titles,
+        )
 
     visit_color_values: list[list[int]] = []
     log_visit_color_values: list[list[float]] = []
@@ -579,6 +589,7 @@ def save_interactive_workspace_coverage_heatmap(
         coverages,
         start=1,
     ):
+        target_column = 1 if shared_space else column
         centers = _voxel_centers(coverage)
         visit_counts = coverage.visit_counts.detach().to(
             device="cpu",
@@ -629,7 +640,7 @@ def save_interactive_workspace_coverage_heatmap(
                 ),
             ),
             row=1,
-            col=column,
+            col=target_column,
         )
 
     metric_buttons = [
@@ -734,14 +745,22 @@ def save_interactive_workspace_coverage_heatmap(
         },
     }
 
-    for index in range(1, len(coverages) + 1):
+    scene_count = 1 if shared_space else len(coverages)
+
+    for index in range(1, scene_count + 1):
         scene_name = "scene" if index == 1 else f"scene{index}"
         layout_updates[scene_name] = scene_layout
 
     figure.update_layout(**layout_updates)
 
+    coordinate_note = (
+        "Left and right arms are shown in one shared world frame."
+        if shared_space
+        else "Left and right panels use their respective local base_link frames."
+    )
+
     figure.add_annotation(
-        text=("Left and right panels use their respective local base_link frames."),
+        text=coordinate_note,
         x=0.5,
         y=-0.08,
         xref="paper",
