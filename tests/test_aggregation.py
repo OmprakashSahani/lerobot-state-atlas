@@ -8,6 +8,7 @@ from lerobot_state_atlas.aggregation import (
 )
 from lerobot_state_atlas.coverage import WorkspaceCoverage
 from lerobot_state_atlas.trajectory import ToolTrajectory
+from lerobot_state_atlas.transforms import RigidTransform
 
 
 def test_aggregate_workspace_coverages_processes_bounded_batches(
@@ -127,3 +128,98 @@ def test_aggregate_workspace_coverages_rejects_invalid_batch_size(
             voxel_size=0.1,
             episode_batch_size=episode_batch_size,
         )
+
+
+def test_aggregate_workspace_coverages_applies_arm_transforms_before_voxelization(
+    monkeypatch,
+) -> None:
+    batch = SimpleNamespace(
+        states=torch.zeros((2, 14), dtype=torch.float32),
+        episode_indices=torch.tensor([3, 7], dtype=torch.int64),
+    )
+
+    def fake_iter_state_batches(
+        repo_id: str,
+        episodes: tuple[int, ...],
+        *,
+        episode_batch_size: int,
+    ):
+        del repo_id, episodes, episode_batch_size
+        yield batch
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.aggregation.iter_state_batches",
+        fake_iter_state_batches,
+    )
+
+    def fake_compute_tool_trajectory(
+        states: torch.Tensor,
+        component_names: tuple[str, ...],
+        model: object,
+        joint_component_map: dict[str, str],
+        *,
+        arm: str,
+        episode_indices: torch.Tensor,
+    ) -> ToolTrajectory:
+        del states, component_names, model, joint_component_map
+
+        positions = (
+            torch.tensor(
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.1, 0.0, 0.0],
+                ],
+                dtype=torch.float64,
+            )
+            if arm == "left"
+            else torch.tensor(
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.1, 0.0],
+                ],
+                dtype=torch.float64,
+            )
+        )
+
+        return ToolTrajectory(
+            arm=arm,
+            link_name="tool0",
+            positions=positions,
+            episode_indices=episode_indices,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.aggregation.compute_tool_trajectory",
+        fake_compute_tool_trajectory,
+    )
+
+    result = aggregate_workspace_coverages(
+        "organization/dataset",
+        (3, 7),
+        component_names=("component",) * 14,
+        model=object(),
+        voxel_size=0.05,
+        episode_batch_size=2,
+        arm_transforms={
+            "left": RigidTransform(
+                translation_xyz=(-0.4, 0.0, 0.0),
+            ),
+            "right": RigidTransform(
+                translation_xyz=(0.4, 0.0, 0.0),
+            ),
+        },
+    )
+
+    left, right = result.coverages
+
+    assert left.voxel_origin_xyz == pytest.approx((0.0, 0.0, 0.0))
+    assert right.voxel_origin_xyz == pytest.approx((0.0, 0.0, 0.0))
+
+    assert left.minimum_xyz == pytest.approx((-0.4, 0.0, 0.0))
+    assert left.maximum_xyz == pytest.approx((-0.3, 0.0, 0.0))
+
+    assert right.minimum_xyz == pytest.approx((0.4, 0.0, 0.0))
+    assert right.maximum_xyz == pytest.approx((0.4, 0.1, 0.0))
+
+    assert left.num_episodes == 2
+    assert right.num_episodes == 2

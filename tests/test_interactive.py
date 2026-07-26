@@ -637,3 +637,89 @@ def test_coverage_heatmap_adds_log_visit_metric_selector(
 
     assert buttons[2].args[1]["coloraxis.colorbar.title.text"] == "Episodes"
     assert buttons[2].args[1]["coloraxis.cauto"] is True
+
+
+def test_coverage_heatmap_renders_shared_dual_arm_scene(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    left = make_trajectory(
+        torch.tensor(
+            [
+                [-0.4, 0.0, 0.1],
+                [-0.3, 0.1, 0.2],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+    )
+    right = make_trajectory(
+        torch.tensor(
+            [
+                [0.4, 0.0, 0.1],
+                [0.3, 0.1, 0.2],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="right",
+    )
+    coverages = (
+        compute_workspace_coverage(
+            left,
+            voxel_size=0.05,
+            voxel_origin_xyz=(0.0, 0.0, 0.0),
+        ),
+        compute_workspace_coverage(
+            right,
+            voxel_size=0.05,
+            voxel_origin_xyz=(0.0, 0.0, 0.0),
+        ),
+    )
+    captured: dict[str, go.Figure] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_coverage_heatmap(
+        coverages,
+        tmp_path / "shared-workspace.html",
+        shared_space=True,
+    )
+
+    figure = captured["figure"]
+    marker_traces = [trace for trace in figure.data if trace.mode == "markers"]
+
+    assert [trace.name for trace in marker_traces] == [
+        "Left visited voxels",
+        "Right visited voxels",
+    ]
+    assert [trace.scene for trace in marker_traces] == [
+        "scene",
+        "scene",
+    ]
+
+    layout = figure.layout.to_plotly_json()
+
+    assert "scene" in layout
+    assert "scene2" not in layout
+
+    annotation_texts = [annotation.text for annotation in figure.layout.annotations]
+
+    assert "Shared dual-arm workspace" in annotation_texts
+    assert (
+        "Left and right arms are shown in one shared world frame." in annotation_texts
+    )
+    assert (
+        "Left and right panels use their respective local base_link frames."
+        not in annotation_texts
+    )
