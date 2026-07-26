@@ -826,6 +826,253 @@ def save_interactive_workspace_heatmap(
     )
 
 
+def _workspace_radius_query_script(
+    voxel_size: float,
+) -> str:
+    """Return browser-side controls for voxel-center radius queries."""
+    default_radius = max(0.05, voxel_size * 2.5)
+
+    script = r"""
+(function() {
+    const graph = document.getElementById('{plot_id}');
+
+    if (!graph) {
+        return;
+    }
+
+    const voxelSize = __VOXEL_SIZE__;
+    const defaultRadius = __DEFAULT_RADIUS__;
+
+    const queryTraceIndices = graph.data
+        .map((trace, traceIndex) => ({
+            trace: trace,
+            traceIndex: traceIndex
+        }))
+        .filter(
+            (entry) =>
+                entry.trace.meta &&
+                entry.trace.meta.radius_query === true
+        )
+        .map((entry) => entry.traceIndex);
+
+    if (queryTraceIndices.length === 0) {
+        return;
+    }
+
+    const controls = document.createElement("div");
+    controls.id = "lerobot-radius-query-controls";
+    controls.style.display = "flex";
+    controls.style.alignItems = "center";
+    controls.style.justifyContent = "center";
+    controls.style.flexWrap = "wrap";
+    controls.style.gap = "10px";
+    controls.style.margin = "12px 0 4px";
+
+    const instruction = document.createElement("span");
+    instruction.textContent = "Click a voxel, then choose a radius:";
+
+    const radiusInput = document.createElement("input");
+    radiusInput.id = "lerobot-radius-query-input";
+    radiusInput.type = "number";
+    radiusInput.min = String(voxelSize);
+    radiusInput.step = String(voxelSize);
+    radiusInput.value = String(defaultRadius);
+    radiusInput.setAttribute(
+        "aria-label",
+        "Workspace query radius in metres"
+    );
+    radiusInput.style.width = "90px";
+
+    const metresLabel = document.createElement("span");
+    metresLabel.textContent = "m";
+
+    const clearButton = document.createElement("button");
+    clearButton.id = "lerobot-radius-query-clear";
+    clearButton.type = "button";
+    clearButton.textContent = "Clear query";
+
+    const resultLabel = document.createElement("span");
+    resultLabel.id = "lerobot-radius-query-result";
+    resultLabel.textContent = "No voxel selected.";
+    resultLabel.style.minWidth = "520px";
+
+    controls.appendChild(instruction);
+    controls.appendChild(radiusInput);
+    controls.appendChild(metresLabel);
+    controls.appendChild(clearButton);
+    controls.appendChild(resultLabel);
+    graph.parentNode.insertBefore(controls, graph);
+
+    let selectedPoint = null;
+
+    function traceScene(trace) {
+        return trace.scene || "scene";
+    }
+
+    let radiusQueryTimeout = null;
+
+    function clearRadiusQueryTimeout() {
+        if (radiusQueryTimeout !== null) {
+            window.clearTimeout(radiusQueryTimeout);
+            radiusQueryTimeout = null;
+        }
+    }
+
+    function clearQuery() {
+        clearRadiusQueryTimeout();
+        selectedPoint = null;
+        resultLabel.textContent = "No voxel selected.";
+    }
+
+    function runRadiusQuery() {
+        if (selectedPoint === null) {
+            return;
+        }
+
+        const radius = Number(radiusInput.value);
+
+        if (!Number.isFinite(radius) || radius <= 0) {
+            resultLabel.textContent =
+                "Radius must be a finite value greater than zero.";
+            return;
+        }
+
+        const radiusSquared = radius * radius;
+        const episodeIds = new Set();
+        const visitsByArm = {};
+        let selectedVoxels = 0;
+        let frameVisits = 0;
+
+        queryTraceIndices.forEach((traceIndex) => {
+            const trace = graph.data[traceIndex];
+            const meta = trace.meta || {};
+            const pointCount = trace.x ? trace.x.length : 0;
+
+            if (traceScene(trace) !== selectedPoint.scene) {
+                return;
+            }
+
+            const visitCounts = meta.radius_visit_counts || [];
+            const episodeIdsByVoxel =
+                meta.radius_episode_ids || [];
+            const arm = meta.radius_arm || "unknown";
+
+            for (
+                let pointIndex = 0;
+                pointIndex < pointCount;
+                pointIndex += 1
+            ) {
+                const deltaX =
+                    Number(trace.x[pointIndex]) - selectedPoint.x;
+                const deltaY =
+                    Number(trace.y[pointIndex]) - selectedPoint.y;
+                const deltaZ =
+                    Number(trace.z[pointIndex]) - selectedPoint.z;
+                const distanceSquared =
+                    deltaX * deltaX +
+                    deltaY * deltaY +
+                    deltaZ * deltaZ;
+
+                if (distanceSquared > radiusSquared + 1e-12) {
+                    continue;
+                }
+
+                selectedVoxels += 1;
+
+                const visits = Number(
+                    visitCounts[pointIndex] || 0
+                );
+                frameVisits += visits;
+                visitsByArm[arm] =
+                    (visitsByArm[arm] || 0) + visits;
+
+                const voxelEpisodeIds =
+                    episodeIdsByVoxel[pointIndex] || [];
+
+                voxelEpisodeIds.forEach((episodeId) => {
+                    episodeIds.add(Number(episodeId));
+                });
+            }
+
+        });
+
+        const armSummary = Object.keys(visitsByArm)
+            .sort()
+            .map(
+                (arm) =>
+                    arm + " " +
+                    visitsByArm[arm].toLocaleString()
+            )
+            .join(", ");
+
+        resultLabel.textContent =
+            "Center (" +
+            selectedPoint.x.toFixed(3) + ", " +
+            selectedPoint.y.toFixed(3) + ", " +
+            selectedPoint.z.toFixed(3) + ") m" +
+            " · radius " + radius.toFixed(3) + " m" +
+            " · " + selectedVoxels.toLocaleString() +
+            " voxels" +
+            " · " + frameVisits.toLocaleString() +
+            " frame visits" +
+            (armSummary ? " (" + armSummary + ")" : "") +
+            " · " + episodeIds.size.toLocaleString() +
+            " distinct episodes";
+    }
+
+    graph.on("plotly_click", (event) => {
+        if (!event.points || event.points.length === 0) {
+            return;
+        }
+
+        const point = event.points[0];
+        const trace = graph.data[point.curveNumber];
+        const meta = trace.meta || {};
+
+        if (meta.radius_query !== true) {
+            return;
+        }
+
+        clearRadiusQueryTimeout();
+
+        selectedPoint = {
+            x: Number(point.x),
+            y: Number(point.y),
+            z: Number(point.z),
+            scene: traceScene(trace)
+        };
+
+        runRadiusQuery();
+    });
+
+    radiusInput.addEventListener("input", () => {
+        clearRadiusQueryTimeout();
+
+        radiusQueryTimeout = window.setTimeout(
+            () => {
+                radiusQueryTimeout = null;
+                runRadiusQuery();
+            },
+            120
+        );
+    });
+
+    clearButton.addEventListener(
+        "click",
+        clearQuery
+    );
+})();
+"""
+
+    return script.replace(
+        "__VOXEL_SIZE__",
+        f"{voxel_size:g}",
+    ).replace(
+        "__DEFAULT_RADIUS__",
+        f"{default_radius:g}",
+    )
+
+
 def save_interactive_workspace_coverage_heatmap(
     coverages: tuple[WorkspaceCoverage, ...],
     output_path: str | Path,
@@ -877,6 +1124,20 @@ def save_interactive_workspace_coverage_heatmap(
 
         if coverage.episode_frequencies.shape[0] != coverage.voxel_indices.shape[0]:
             raise ValueError("Coverage episode-frequency size must match voxel count.")
+
+        if len(coverage.episode_ids_by_voxel) != coverage.voxel_indices.shape[0]:
+            raise ValueError("Coverage episode-ID size must match voxel count.")
+
+        for episode_ids, episode_count in zip(
+            coverage.episode_ids_by_voxel,
+            coverage.episode_counts.tolist(),
+            strict=True,
+        ):
+            if episode_ids != tuple(sorted(set(episode_ids))):
+                raise ValueError("Coverage episode IDs must be sorted and distinct.")
+
+            if len(episode_ids) != int(episode_count):
+                raise ValueError("Coverage episode-ID count must match episode count.")
 
         if not torch.isfinite(coverage.episode_frequencies).all().item():
             raise ValueError(
@@ -967,6 +1228,15 @@ def save_interactive_workspace_coverage_heatmap(
                     "opacity": 0.72,
                 },
                 customdata=customdata.tolist(),
+                meta={
+                    "radius_query": True,
+                    "radius_arm": coverage.arm,
+                    "radius_visit_counts": visit_counts.tolist(),
+                    "radius_episode_ids": [
+                        list(episode_ids)
+                        for episode_ids in coverage.episode_ids_by_voxel
+                    ],
+                },
                 hovertemplate=(
                     "Visited voxel"
                     "<br>x=%{x:.4f} m"
@@ -1115,6 +1385,11 @@ def save_interactive_workspace_coverage_heatmap(
         include_plotlyjs=True,
         full_html=True,
         auto_open=False,
+        config={
+            "scrollZoom": True,
+            "responsive": True,
+        },
+        post_script=_workspace_radius_query_script(coverages[0].voxel_size),
     )
 
     return InteractiveWorkspaceHeatmap(

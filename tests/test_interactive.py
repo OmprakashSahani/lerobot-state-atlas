@@ -627,7 +627,11 @@ def test_save_interactive_workspace_coverage_heatmap(
 
     assert not [trace for trace in figure.data if trace.mode == "lines"]
 
-    marker_traces = [trace for trace in figure.data if trace.mode == "markers"]
+    marker_traces = [
+        trace
+        for trace in figure.data
+        if trace.meta and trace.meta.get("radius_query") is True
+    ]
 
     assert [trace.name for trace in marker_traces] == [
         "Left visited voxels",
@@ -749,6 +753,87 @@ def test_coverage_heatmap_adds_log_visit_metric_selector(
     assert buttons[2].args[1]["coloraxis.cauto"] is True
 
 
+def test_coverage_heatmap_adds_voxel_radius_query(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    trajectory = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+                [0.3, 0.0, 0.0],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+        episode_indices=torch.tensor(
+            [2, 5, 5, 7],
+            dtype=torch.int64,
+        ),
+    )
+    coverage = compute_workspace_coverage(
+        trajectory,
+        voxel_size=0.25,
+        voxel_origin_xyz=(0.0, 0.0, 0.0),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_coverage_heatmap(
+        (coverage,),
+        tmp_path / "radius-query.html",
+        shared_space=True,
+    )
+
+    figure = captured["figure"]
+    assert isinstance(figure, go.Figure)
+
+    assert len(figure.data) == 1
+
+    marker_trace = figure.data[0]
+    assert marker_trace.meta["radius_query"] is True
+    assert marker_trace.meta["radius_arm"] == "left"
+    assert marker_trace.meta["radius_visit_counts"] == (coverage.visit_counts.tolist())
+    assert marker_trace.meta["radius_episode_ids"] == [
+        list(episode_ids) for episode_ids in coverage.episode_ids_by_voxel
+    ]
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["config"]["scrollZoom"] is True
+    assert kwargs["config"]["responsive"] is True
+
+    script = kwargs["post_script"]
+    assert isinstance(script, str)
+    assert "lerobot-radius-query-controls" in script
+    assert "lerobot-radius-query-input" in script
+    assert "lerobot-radius-query-clear" in script
+    assert "lerobot-radius-query-result" in script
+    assert 'graph.on("plotly_click"' in script
+    assert "function runRadiusQuery()" in script
+    assert "radius_visit_counts" in script
+    assert "radius_episode_ids" in script
+    assert "frame visits" in script
+    assert "distinct episodes" in script
+    assert "Plotly.restyle(" not in script
+    assert "radius_query_highlight" not in script
+
+
 def test_coverage_heatmap_renders_shared_dual_arm_scene(
     monkeypatch,
     tmp_path: Path,
@@ -807,7 +892,11 @@ def test_coverage_heatmap_renders_shared_dual_arm_scene(
     )
 
     figure = captured["figure"]
-    marker_traces = [trace for trace in figure.data if trace.mode == "markers"]
+    marker_traces = [
+        trace
+        for trace in figure.data
+        if trace.meta and trace.meta.get("radius_query") is True
+    ]
 
     assert [trace.name for trace in marker_traces] == [
         "Left visited voxels",

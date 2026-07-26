@@ -15,6 +15,7 @@ LeRobot State Atlas loads robot state trajectories, applies forward kinematics u
 - Aggregate large episode ranges in bounded memory.
 - Compare multiple episodes with separate trajectory colours.
 - Hover over voxels to inspect coordinates and visit counts.
+- Query a configurable radius around any aggregated workspace voxel.
 - Rotate, zoom, and pan interactive 3D workspace views during playback.
 - Automatically rotate the shared workspace while trajectories play.
 - Play, pause, reset, and seek through trajectory playback.
@@ -134,6 +135,7 @@ For larger selections, generate a coverage-only heatmap while loading episodes i
 - voxelizes both arms in one shared world coordinate frame
 - incrementally accumulates raw voxel visit counts
 - counts the distinct episodes that entered each voxel
+- preserves exact per-voxel episode identities for radius queries
 - retains aggregate statistics instead of every trajectory point
 - writes a self-contained interactive HTML heatmap
 
@@ -144,6 +146,17 @@ The generated heatmap includes a metric selector with three views:
 - **Episode count** — number of distinct selected episodes that entered each voxel
 
 Hover information shows the raw visit count, its `log1p` value, and the distinct episode count for each voxel. Each metric uses its own automatically adjusted colour range. The logarithmic transform affects only the displayed colours; the underlying raw visit counts remain unchanged.
+
+The aggregated heatmap also provides a workspace radius query:
+
+- click any occupied voxel to use its centre as the query centre
+- enter a radius in metres
+- inspect the number of arm-specific voxel entries whose centres lie inside the radius
+- inspect total frame visits and separate left/right arm visit counts
+- inspect the exact number of distinct selected episodes represented in the radius
+- use **Clear query** to remove the current selection
+
+Radius membership is based on Euclidean distance between voxel centres. In a shared dual-arm query, one dataset frame can contribute one tool-point visit for each arm, so the displayed **frame visits** are arm-specific tool-point visits rather than a deduplicated dataset-frame count.
 
 The default shared-frame placement uses zero arm rotations and positions the arm bases laterally along the world Y axis:
 
@@ -161,7 +174,8 @@ A real validation using episodes 0 through 9 produced:
 - 10,248 dual-arm tool points
 - 1,224 arm-specific occupied-voxel entries at a `0.020 m` voxel size
 - a shared scene using `0.8 m` provisional lateral arm spacing
-- a 4.8 MB self-contained HTML visualization
+- responsive voxel-centred radius queries with exact distinct-episode counts
+- a self-contained offline HTML visualization
 
 ## Coordinate frames
 
