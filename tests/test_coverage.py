@@ -360,6 +360,7 @@ def test_workspace_coverage_accumulator_matches_combined_trajectory() -> None:
         aggregated.visit_counts,
         expected.visit_counts,
     )
+    assert aggregated.episode_ids_by_voxel == expected.episode_ids_by_voxel
 
 
 def test_workspace_coverage_accumulator_requires_data() -> None:
@@ -434,6 +435,10 @@ def test_compute_workspace_coverage_counts_distinct_episodes_per_voxel() -> None
         coverage.episode_frequencies,
         torch.tensor([1.0, 0.5], dtype=torch.float64),
     )
+    assert coverage.episode_ids_by_voxel == (
+        (0, 1),
+        (1,),
+    )
 
 
 def test_workspace_coverage_accumulator_counts_episodes_across_batches() -> None:
@@ -507,4 +512,9 @@ def test_workspace_coverage_accumulator_counts_episodes_across_batches() -> None
             [2.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
             dtype=torch.float64,
         ),
+    )
+    assert coverage.episode_ids_by_voxel == (
+        (0, 2),
+        (1,),
+        (2,),
     )

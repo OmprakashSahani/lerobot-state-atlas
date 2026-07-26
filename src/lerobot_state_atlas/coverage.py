@@ -36,6 +36,7 @@ class WorkspaceCoverage:
     visit_counts: Tensor
     episode_counts: Tensor
     episode_frequencies: Tensor
+    episode_ids_by_voxel: tuple[tuple[int, ...], ...]
 
     @property
     def maximum_visit_count(self) -> int:
@@ -190,6 +191,24 @@ def compute_workspace_coverage(
 
     episode_frequencies = episode_counts.to(dtype=torch.float64) / num_episodes
 
+    episode_ids_lookup: dict[
+        tuple[int, int, int],
+        list[int],
+    ] = {tuple(int(value) for value in index): [] for index in voxel_indices.tolist()}
+
+    for x_index, y_index, z_index, episode_index in voxel_episode_pairs.tolist():
+        key = (
+            int(x_index),
+            int(y_index),
+            int(z_index),
+        )
+        episode_ids_lookup[key].append(int(episode_index))
+
+    episode_ids_by_voxel = tuple(
+        tuple(episode_ids_lookup[tuple(int(value) for value in index)])
+        for index in voxel_indices.tolist()
+    )
+
     minimum_voxel_indices = voxel_indices.min(dim=0).values
     maximum_voxel_indices = voxel_indices.max(dim=0).values
     grid_shape_values = maximum_voxel_indices - minimum_voxel_indices + 1
@@ -224,6 +243,7 @@ def compute_workspace_coverage(
         visit_counts=visit_counts,
         episode_counts=episode_counts,
         episode_frequencies=episode_frequencies,
+        episode_ids_by_voxel=episode_ids_by_voxel,
     )
 
 
@@ -391,6 +411,10 @@ class WorkspaceCoverageAccumulator:
         )
         num_episodes = len(self._episode_indices)
         episode_frequencies = episode_counts.to(dtype=torch.float64) / num_episodes
+        episode_ids_by_voxel = tuple(
+            tuple(sorted(self._episode_ids_by_voxel[index]))
+            for index, _ in ordered_counts
+        )
 
         minimum_voxel_indices = voxel_indices.min(dim=0).values
         maximum_voxel_indices = voxel_indices.max(dim=0).values
@@ -427,4 +451,5 @@ class WorkspaceCoverageAccumulator:
             visit_counts=visit_counts,
             episode_counts=episode_counts,
             episode_frequencies=episode_frequencies,
+            episode_ids_by_voxel=episode_ids_by_voxel,
         )
