@@ -66,7 +66,12 @@ describe("accessible product content", () => {
     expect(screen.getByText(manifest.coverage.spacingDisclosure)).toBeVisible();
     expect(screen.getByText("Requested dataset ref")).toBeVisible();
     expect(screen.getByText("Resolved HF commit")).toBeVisible();
-    expect(screen.getByText("Uncommitted exporter source")).toBeVisible();
-    expect(screen.getByText(manifest.exporter.sourceDescription)).toBeVisible();
+    expect(screen.getByText("Repository HEAD")).toBeVisible();
+    expect(
+      screen.queryByText("Uncommitted exporter source"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(manifest.exporter.sourceDescription),
+    ).not.toBeInTheDocument();
   });
 });

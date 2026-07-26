@@ -21,7 +21,7 @@ describe("browser-data compatibility", () => {
     expect(manifest.dataset.requestedRevision).not.toBe(
       manifest.dataset.resolvedRevision,
     );
-    expect(manifest.exporter.workingTreeDirty).toBe(true);
+    expect(manifest.exporter.workingTreeDirty).toBe(false);
     expect(coverage.arms.map((arm) => arm.arm)).toEqual(["left", "right"]);
     expect(
       coverage.arms.reduce((total, arm) => total + arm.visitCounts.length, 0),

@@ -271,10 +271,10 @@ ignored output such as `node_modules` and `.next` is excluded.
 The included demo uses episodes 0 through 9 for coverage and episodes 0 and 1
 for the optional, currently unloaded trajectory payload. Its files are:
 
-- `manifest.json`: 2,457 bytes uncompressed; 1,343 bytes gzip-compressed
+- `manifest.json`: 2,422 bytes uncompressed; 1,313 bytes gzip-compressed
 - `coverage.json`: 26,564 bytes uncompressed; 7,638 bytes gzip-compressed
 - `trajectories.json`: 139,152 bytes uncompressed; 57,461 bytes gzip-compressed
-- total: 168,173 bytes uncompressed; 66,442 bytes gzip-compressed
+- total: 168,138 bytes uncompressed; 66,412 bytes gzip-compressed
 
 Compressed sizes use gzip level 9 and may vary slightly with the deployment
 CDN. The viewer loads only the manifest and coverage payload.
