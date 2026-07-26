@@ -22,7 +22,10 @@ from lerobot_state_atlas.trajectory import (
     build_trlc_dk1_joint_component_map,
     compute_tool_trajectory,
 )
-from lerobot_state_atlas.transforms import RigidTransform
+from lerobot_state_atlas.transforms import (
+    RigidTransform,
+    transform_tool_trajectory,
+)
 from lerobot_state_atlas.urdf import load_robot_model
 from lerobot_state_atlas.visualization import (
     save_workspace_plot,
@@ -294,6 +297,14 @@ def interactive_workspace(
         "--voxel-size",
         help="Workspace voxel edge length in metres.",
     ),
+    arm_spacing: float = typer.Option(
+        0.8,
+        "--arm-spacing",
+        help=(
+            "Lateral distance in metres between the left and right "
+            "arm bases in the shared world frame."
+        ),
+    ),
     output_path: Path = typer.Option(
         Path("workspace-heatmap.html"),
         "--output",
@@ -315,6 +326,9 @@ def interactive_workspace(
         if not isfinite(voxel_size) or voxel_size <= 0.0:
             raise ValueError("Voxel size must be finite and greater than zero.")
 
+        if not isfinite(arm_spacing) or arm_spacing <= 0.0:
+            raise ValueError("Arm spacing must be finite and greater than zero.")
+
         console.print(f"Loading metadata for [bold]{repo_id}[/bold]...")
         summary = load_dataset_summary(repo_id)
         component_names = _state_component_names(summary)
@@ -331,7 +345,7 @@ def interactive_workspace(
         console.print(f"Loading robot model from [bold]{urdf_path}[/bold]...")
         model = load_robot_model(urdf_path)
 
-        trajectories = tuple(
+        local_trajectories = tuple(
             compute_tool_trajectory(
                 batch.states,
                 component_names,
@@ -343,10 +357,29 @@ def interactive_workspace(
             for arm in ("left", "right")
         )
 
+        half_spacing = arm_spacing / 2.0
+        arm_transforms = {
+            "left": RigidTransform(
+                translation_xyz=(0.0, half_spacing, 0.0),
+            ),
+            "right": RigidTransform(
+                translation_xyz=(0.0, -half_spacing, 0.0),
+            ),
+        }
+
+        trajectories = tuple(
+            transform_tool_trajectory(
+                trajectory,
+                arm_transforms[trajectory.arm],
+            )
+            for trajectory in local_trajectories
+        )
+
         coverages = tuple(
             compute_workspace_coverage(
                 trajectory,
                 voxel_size=voxel_size,
+                voxel_origin_xyz=(0.0, 0.0, 0.0),
             )
             for trajectory in trajectories
         )
@@ -356,10 +389,14 @@ def interactive_workspace(
             output_path,
             coverages=coverages,
             playback_fps=summary.fps,
+            shared_space=True,
             title=(
-                f"TRLC-DK1 Episode {episode_text} Interactive Workspace Heatmap"
+                f"TRLC-DK1 Episode {episode_text} Shared Interactive Workspace Heatmap"
                 if len(episode) == 1
-                else (f"TRLC-DK1 Episodes {episode_text} Interactive Workspace Heatmap")
+                else (
+                    f"TRLC-DK1 Episodes {episode_text} "
+                    "Shared Interactive Workspace Heatmap"
+                )
             ),
         )
     except Exception as error:
@@ -375,10 +412,10 @@ def interactive_workspace(
     )
     console.print(f"Occupied voxels: {result.occupied_voxels:,}")
     console.print(f"Voxel size: {result.voxel_size:.3f} m")
+    console.print(f"Arm base spacing: {arm_spacing:.3f} m")
     console.print(
         "[yellow]Coordinate note:[/yellow] "
-        "left and right panels use their respective "
-        "local base_link frames."
+        "left and right arms are shown in one shared world frame."
     )
 
 

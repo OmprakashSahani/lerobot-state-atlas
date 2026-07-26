@@ -376,6 +376,83 @@ def test_interactive_heatmap_displays_coordinate_frame_note(
     assert captured["figure"].layout.margin.b >= 60
 
 
+def test_interactive_heatmap_renders_shared_dual_arm_scene(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    left = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, 0.4, 0.0],
+                [0.1, 0.3, 0.1],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="left",
+    )
+    right = make_trajectory(
+        torch.tensor(
+            [
+                [0.0, -0.4, 0.0],
+                [0.1, -0.3, 0.1],
+            ],
+            dtype=torch.float64,
+        ),
+        arm="right",
+    )
+    captured: dict[str, go.Figure] = {}
+
+    def fake_write_html(
+        figure: go.Figure,
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        captured["figure"] = figure
+
+    monkeypatch.setattr(
+        go.Figure,
+        "write_html",
+        fake_write_html,
+    )
+
+    save_interactive_workspace_heatmap(
+        (left, right),
+        tmp_path / "shared-workspace.html",
+        coverages=(
+            compute_workspace_coverage(
+                left,
+                voxel_size=0.05,
+                voxel_origin_xyz=(0.0, 0.0, 0.0),
+            ),
+            compute_workspace_coverage(
+                right,
+                voxel_size=0.05,
+                voxel_origin_xyz=(0.0, 0.0, 0.0),
+            ),
+        ),
+        playback_fps=50.0,
+        shared_space=True,
+    )
+
+    figure = captured["figure"]
+    layout = figure.to_plotly_json()["layout"]
+
+    assert all(trace.scene == "scene" for trace in figure.data)
+    assert "scene" in layout
+    assert "scene2" not in layout
+
+    annotation_texts = [annotation.text for annotation in figure.layout.annotations]
+
+    assert "Shared dual-arm workspace" in annotation_texts
+    assert (
+        "Left and right arms are shown in one shared world frame." in annotation_texts
+    )
+    assert (
+        "Left and right panels use their respective local base_link frames."
+        not in annotation_texts
+    )
+
+
 def test_interactive_heatmap_embeds_trajectory_playback(
     monkeypatch,
     tmp_path: Path,
@@ -429,15 +506,31 @@ def test_interactive_heatmap_embeds_trajectory_playback(
     line_traces = [trace for trace in figure.data if trace.mode == "lines"]
 
     assert [trace.meta["playback_start_frame"] for trace in line_traces] == [0, 2]
+    assert figure.layout.uirevision == "lerobot-playback-layout"
+    assert figure.layout.scene.uirevision == "lerobot-playback-camera"
 
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
+
+    config = kwargs["config"]
+    assert config["scrollZoom"] is True
+    assert config["responsive"] is True
 
     script = kwargs["post_script"]
     assert isinstance(script, str)
     assert "lerobot-playback-toggle" in script
     assert "lerobot-playback-reset" in script
+    assert "lerobot-playback-auto-rotate" in script
+    assert "Auto rotate: On" in script
+    assert "window.requestAnimationFrame(rotateScenes)" in script
+    assert "Plotly.relayout(graph, layoutUpdate)" in script
+    assert "angularSpeed = 0.35" in script
     assert "Plotly.extendTraces" in script
+    assert "synchronizePlayback" in script
+    assert "isInteracting" in script
+    assert 'graph.addEventListener("pointerdown"' in script
+    assert 'window.addEventListener(\n        "pointerup"' in script
+    assert 'window.addEventListener(\n        "pointercancel"' in script
     assert "frameIntervalMs = 20" in script
 
 
