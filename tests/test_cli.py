@@ -630,6 +630,7 @@ def test_interactive_workspace_help() -> None:
     assert "--urdf" in result.stdout
     assert "--episode" in result.stdout
     assert "--voxel-size" in result.stdout
+    assert "--arm-spacing" in result.stdout
     assert "--output" in result.stdout
 
 
@@ -719,12 +720,24 @@ def test_interactive_workspace_command(
         "lerobot_state_atlas.cli.compute_tool_trajectory",
         fake_compute_trajectory,
     )
-    monkeypatch.setattr(
-        "lerobot_state_atlas.cli.compute_workspace_coverage",
-        lambda trajectory, *, voxel_size: SimpleNamespace(
+
+    def fake_compute_coverage(
+        trajectory: ToolTrajectory,
+        *,
+        voxel_size: float,
+        voxel_origin_xyz: tuple[float, float, float],
+    ) -> SimpleNamespace:
+        calls[f"{trajectory.arm}_coverage_positions"] = trajectory.positions.clone()
+        calls[f"{trajectory.arm}_voxel_origin"] = voxel_origin_xyz
+
+        return SimpleNamespace(
             arm=trajectory.arm,
             voxel_size=voxel_size,
-        ),
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.compute_workspace_coverage",
+        fake_compute_coverage,
     )
 
     def fake_save_heatmap(
@@ -734,12 +747,14 @@ def test_interactive_workspace_command(
         coverages: tuple[SimpleNamespace, ...],
         title: str,
         playback_fps: float,
+        shared_space: bool,
     ) -> InteractiveWorkspaceHeatmap:
         calls["trajectories"] = trajectories
         calls["coverages"] = coverages
         calls["output_path"] = destination
         calls["title"] = title
         calls["playback_fps"] = playback_fps
+        calls["shared_space"] = shared_space
 
         return InteractiveWorkspaceHeatmap(
             output_path=destination,
@@ -765,6 +780,8 @@ def test_interactive_workspace_command(
             "2",
             "--episode",
             "5",
+            "--arm-spacing",
+            "0.8",
             "--output",
             str(output_path),
         ],
@@ -774,13 +791,27 @@ def test_interactive_workspace_command(
     assert calls["repo_id"] == "DreamMachines/example"
     assert calls["episodes"] == [2, 5]
     assert calls["output_path"] == output_path
-    assert calls["title"] == ("TRLC-DK1 Episodes 2, 5 Interactive Workspace Heatmap")
+    assert calls["title"] == (
+        "TRLC-DK1 Episodes 2, 5 Shared Interactive Workspace Heatmap"
+    )
     assert calls["playback_fps"] == pytest.approx(50.0)
+    assert calls["shared_space"] is True
+
+    trajectories = calls["trajectories"]
+    left_trajectory = trajectories[0]
+    right_trajectory = trajectories[1]
+
+    assert left_trajectory.positions[:, 1] == pytest.approx([0.4, 0.5, 0.6, 0.7])
+    assert right_trajectory.positions[:, 1] == pytest.approx([-0.4, -0.3, -0.2, -0.1])
+    assert calls["left_voxel_origin"] == (0.0, 0.0, 0.0)
+    assert calls["right_voxel_origin"] == (0.0, 0.0, 0.0)
+
     assert "Saved interactive workspace heatmap" in result.stdout
     assert "Plotted 8 points" in result.stdout
     assert "Occupied voxels: 6" in result.stdout
     assert "Voxel size: 0.020 m" in result.stdout
-    assert "localbase_linkframes" in compact_output(result.stdout)
+    assert "Arm base spacing: 0.800 m" in result.stdout
+    assert "sharedworldframe" in compact_output(result.stdout)
 
 
 def test_aggregate_workspace_help() -> None:

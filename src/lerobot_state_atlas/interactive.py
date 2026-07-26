@@ -172,12 +172,18 @@ def _trajectory_playback_script(
     resetButton.type = "button";
     resetButton.textContent = "Reset";
 
+    const rotationButton = document.createElement("button");
+    rotationButton.id = "lerobot-playback-auto-rotate";
+    rotationButton.type = "button";
+    rotationButton.textContent = "Auto rotate: On";
+
     const frameLabel = document.createElement("span");
     frameLabel.id = "lerobot-playback-frame";
     frameLabel.textContent = "Frame 0";
 
     controls.appendChild(toggleButton);
     controls.appendChild(resetButton);
+    controls.appendChild(rotationButton);
     controls.appendChild(frameLabel);
     graph.parentNode.insertBefore(controls, graph);
 
@@ -191,7 +197,131 @@ def _trajectory_playback_script(
     );
 
     let currentFrame = 0;
+    let renderedFrame = 0;
     let timer = null;
+    let isInteracting = false;
+    let autoRotateEnabled = true;
+    let rotationAnimationFrame = null;
+    let previousRotationTime = null;
+    let wheelInteractionTimeout = null;
+
+    const sceneNames = Object.keys(graph._fullLayout).filter(
+        (name) => /^scene\\d*$/.test(name)
+    );
+
+    function sceneCameraState(sceneName) {{
+        const scene = graph._fullLayout[sceneName];
+        const eye =
+            scene.camera && scene.camera.eye
+                ? scene.camera.eye
+                : {{x: 1.25, y: 1.25, z: 1.25}};
+
+        return {{
+            radius: Math.hypot(eye.x, eye.y),
+            angle: Math.atan2(eye.y, eye.x),
+            z: eye.z
+        }};
+    }}
+
+    const cameraStates = Object.fromEntries(
+        sceneNames.map((sceneName) => [
+            sceneName,
+            sceneCameraState(sceneName)
+        ])
+    );
+
+    function visibleFrameCount(trajectory, frame) {{
+        return Math.max(
+            0,
+            Math.min(
+                frame - trajectory.startFrame,
+                trajectory.x.length
+            )
+        );
+    }}
+
+    function synchronizePlayback() {{
+        trajectories.forEach((trajectory) => {{
+            const visibleFrames = visibleFrameCount(
+                trajectory,
+                currentFrame
+            );
+
+            Plotly.restyle(
+                graph,
+                {{
+                    x: [trajectory.x.slice(0, visibleFrames)],
+                    y: [trajectory.y.slice(0, visibleFrames)],
+                    z: [trajectory.z.slice(0, visibleFrames)]
+                }},
+                [trajectory.traceIndex]
+            );
+        }});
+
+        renderedFrame = currentFrame;
+    }}
+
+    function stopRotation() {{
+        if (rotationAnimationFrame !== null) {{
+            window.cancelAnimationFrame(rotationAnimationFrame);
+            rotationAnimationFrame = null;
+        }}
+
+        previousRotationTime = null;
+    }}
+
+    function rotateScenes(timestamp) {{
+        if (
+            timer === null ||
+            !autoRotateEnabled ||
+            isInteracting
+        ) {{
+            stopRotation();
+            return;
+        }}
+
+        if (previousRotationTime === null) {{
+            previousRotationTime = timestamp;
+        }}
+
+        const elapsedSeconds =
+            (timestamp - previousRotationTime) / 1000.0;
+        previousRotationTime = timestamp;
+
+        const angularSpeed = 0.35;
+        const layoutUpdate = {{}};
+
+        sceneNames.forEach((sceneName) => {{
+            const cameraState = cameraStates[sceneName];
+            cameraState.angle += angularSpeed * elapsedSeconds;
+
+            layoutUpdate[sceneName + ".camera.eye.x"] =
+                cameraState.radius * Math.cos(cameraState.angle);
+            layoutUpdate[sceneName + ".camera.eye.y"] =
+                cameraState.radius * Math.sin(cameraState.angle);
+            layoutUpdate[sceneName + ".camera.eye.z"] =
+                cameraState.z;
+        }});
+
+        Plotly.relayout(graph, layoutUpdate);
+        rotationAnimationFrame =
+            window.requestAnimationFrame(rotateScenes);
+    }}
+
+    function startRotation() {{
+        if (
+            rotationAnimationFrame !== null ||
+            timer === null ||
+            !autoRotateEnabled ||
+            isInteracting
+        ) {{
+            return;
+        }}
+
+        previousRotationTime = null;
+        rotationAnimationFrame =
+            window.requestAnimationFrame(rotateScenes);
+    }}
 
     function stopPlayback() {{
         if (timer !== null) {{
@@ -199,6 +329,7 @@ def _trajectory_playback_script(
             timer = null;
         }}
 
+        stopRotation();
         toggleButton.textContent = "Play";
     }}
 
@@ -206,40 +337,37 @@ def _trajectory_playback_script(
         stopPlayback();
         currentFrame = 0;
         frameLabel.textContent = "Frame 0";
-
-        trajectories.forEach((trajectory) => {{
-            Plotly.restyle(
-                graph,
-                {{
-                    x: [[]],
-                    y: [[]],
-                    z: [[]]
-                }},
-                [trajectory.traceIndex]
-            );
-        }});
+        synchronizePlayback();
     }}
 
     function advancePlayback() {{
-        trajectories.forEach((trajectory) => {{
-            const localFrame =
-                currentFrame - trajectory.startFrame;
-
-            if (
-                localFrame >= 0 &&
-                localFrame < trajectory.x.length
-            ) {{
-                Plotly.extendTraces(
-                    graph,
-                    {{
-                        x: [[trajectory.x[localFrame]]],
-                        y: [[trajectory.y[localFrame]]],
-                        z: [[trajectory.z[localFrame]]]
-                    }},
-                    [trajectory.traceIndex]
-                );
+        if (!isInteracting) {{
+            if (renderedFrame !== currentFrame) {{
+                synchronizePlayback();
             }}
-        }});
+
+            trajectories.forEach((trajectory) => {{
+                const localFrame =
+                    currentFrame - trajectory.startFrame;
+
+                if (
+                    localFrame >= 0 &&
+                    localFrame < trajectory.x.length
+                ) {{
+                    Plotly.extendTraces(
+                        graph,
+                        {{
+                            x: [[trajectory.x[localFrame]]],
+                            y: [[trajectory.y[localFrame]]],
+                            z: [[trajectory.z[localFrame]]]
+                        }},
+                        [trajectory.traceIndex]
+                    );
+                }}
+            }});
+
+            renderedFrame = currentFrame + 1;
+        }}
 
         currentFrame += 1;
         frameLabel.textContent =
@@ -249,6 +377,57 @@ def _trajectory_playback_script(
             stopPlayback();
         }}
     }}
+
+    function refreshCameraStates() {{
+        sceneNames.forEach((sceneName) => {{
+            cameraStates[sceneName] =
+                sceneCameraState(sceneName);
+        }});
+    }}
+
+    function beginInteraction() {{
+        isInteracting = true;
+        stopRotation();
+    }}
+
+    function finishInteraction() {{
+        if (!isInteracting) {{
+            return;
+        }}
+
+        isInteracting = false;
+        refreshCameraStates();
+        synchronizePlayback();
+        startRotation();
+    }}
+
+    graph.addEventListener("pointerdown", beginInteraction);
+
+    graph.addEventListener(
+        "wheel",
+        () => {{
+            beginInteraction();
+
+            if (wheelInteractionTimeout !== null) {{
+                window.clearTimeout(wheelInteractionTimeout);
+            }}
+
+            wheelInteractionTimeout = window.setTimeout(
+                finishInteraction,
+                250
+            );
+        }},
+        {{passive: true}}
+    );
+
+    window.addEventListener(
+        "pointerup",
+        finishInteraction
+    );
+    window.addEventListener(
+        "pointercancel",
+        finishInteraction
+    );
 
     toggleButton.addEventListener("click", () => {{
         if (timer !== null) {{
@@ -265,12 +444,27 @@ def _trajectory_playback_script(
             advancePlayback,
             frameIntervalMs
         );
+        startRotation();
     }});
 
     resetButton.addEventListener(
         "click",
         resetPlayback
     );
+
+    rotationButton.addEventListener("click", () => {{
+        autoRotateEnabled = !autoRotateEnabled;
+        rotationButton.textContent = autoRotateEnabled
+            ? "Auto rotate: On"
+            : "Auto rotate: Off";
+
+        if (autoRotateEnabled) {{
+            refreshCameraStates();
+            startRotation();
+        }} else {{
+            stopRotation();
+        }}
+    }});
 
     resetPlayback();
 }})();
@@ -284,6 +478,7 @@ def save_interactive_workspace_heatmap(
     coverages: tuple[WorkspaceCoverage, ...],
     title: str = "Interactive tool workspace heatmap",
     playback_fps: float | None = None,
+    shared_space: bool = False,
 ) -> InteractiveWorkspaceHeatmap:
     """Save an offline interactive 3D workspace heatmap as HTML."""
     _validate_inputs(
@@ -304,17 +499,25 @@ def save_interactive_workspace_heatmap(
         exist_ok=True,
     )
 
-    subplot_titles = tuple(
-        f"{trajectory.arm.capitalize()} {trajectory.link_name}"
-        for trajectory in trajectories
-    )
-
-    figure = make_subplots(
-        rows=1,
-        cols=len(trajectories),
-        specs=[[{"type": "scene"} for _ in trajectories]],
-        subplot_titles=subplot_titles,
-    )
+    if shared_space:
+        subplot_titles = ("Shared dual-arm workspace",)
+        figure = make_subplots(
+            rows=1,
+            cols=1,
+            specs=[[{"type": "scene"}]],
+            subplot_titles=subplot_titles,
+        )
+    else:
+        subplot_titles = tuple(
+            f"{trajectory.arm.capitalize()} {trajectory.link_name}"
+            for trajectory in trajectories
+        )
+        figure = make_subplots(
+            rows=1,
+            cols=len(trajectories),
+            specs=[[{"type": "scene"} for _ in trajectories]],
+            subplot_titles=subplot_titles,
+        )
 
     for column, (trajectory, coverage) in enumerate(
         zip(
@@ -324,6 +527,7 @@ def save_interactive_workspace_heatmap(
         ),
         start=1,
     ):
+        target_column = 1 if shared_space else column
         centers = _voxel_centers(coverage)
         visit_counts = coverage.visit_counts.detach().to(
             device="cpu",
@@ -374,7 +578,7 @@ def save_interactive_workspace_heatmap(
                     ),
                 ),
                 row=1,
-                col=column,
+                col=target_column,
             )
 
             playback_start_frame += positions.shape[0]
@@ -403,7 +607,7 @@ def save_interactive_workspace_heatmap(
                 ),
             ),
             row=1,
-            col=column,
+            col=target_column,
         )
 
     scene_layout = {
@@ -411,9 +615,11 @@ def save_interactive_workspace_heatmap(
         "yaxis_title": "Y (m)",
         "zaxis_title": "Z (m)",
         "aspectmode": "data",
+        "uirevision": "lerobot-playback-camera",
     }
 
     layout_updates: dict[str, object] = {
+        "uirevision": "lerobot-playback-layout",
         "title": {
             "text": title,
             "x": 0.5,
@@ -447,13 +653,19 @@ def save_interactive_workspace_heatmap(
         },
     }
 
-    for index in range(1, len(trajectories) + 1):
+    scene_count = 1 if shared_space else len(trajectories)
+
+    for index in range(1, scene_count + 1):
         scene_name = "scene" if index == 1 else f"scene{index}"
         layout_updates[scene_name] = scene_layout
 
     figure.update_layout(**layout_updates)
     figure.add_annotation(
-        text=("Left and right panels use their respective local base_link frames."),
+        text=(
+            "Left and right arms are shown in one shared world frame."
+            if shared_space
+            else "Left and right panels use their respective local base_link frames."
+        ),
         x=0.5,
         y=-0.08,
         xref="paper",
@@ -468,6 +680,10 @@ def save_interactive_workspace_heatmap(
         "include_plotlyjs": True,
         "full_html": True,
         "auto_open": False,
+        "config": {
+            "scrollZoom": True,
+            "responsive": True,
+        },
     }
 
     if playback_fps is not None:

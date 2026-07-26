@@ -15,7 +15,8 @@ LeRobot State Atlas loads robot state trajectories, applies forward kinematics u
 - Aggregate large episode ranges in bounded memory.
 - Compare multiple episodes with separate trajectory colours.
 - Hover over voxels to inspect coordinates and visit counts.
-- Rotate, zoom, and pan each arm workspace independently.
+- Rotate, zoom, and pan interactive 3D workspace views during playback.
+- Automatically rotate the shared workspace while trajectories play.
 - Play, pause, and reset trajectory playback.
 - Animate trajectories using the dataset's native FPS.
 - Preserve episode boundaries without drawing false connections.
@@ -89,20 +90,24 @@ Create a self-contained offline HTML visualization:
       --episode 1 \
       --episode 2 \
       --voxel-size 0.02 \
-      --output artifacts/episodes-0-1-2-workspace.html
+      --arm-spacing 0.8 \
+      --output artifacts/episodes-0-1-2-shared-workspace.html
 
 The interactive visualization provides:
 
-- separate left and right 3D panels
+- one shared dual-arm 3D world-space scene
+- configurable lateral arm-base spacing
 - one coloured trajectory per episode and arm
 - voxel colours based on raw visit frequency
-- coordinate and visit-count hover information
-- independent rotation, zoom, and pan
+- transformed world-coordinate and visit-count hover information
+- rotation, zoom, and pan while playback continues
+- synchronized automatic camera rotation during playback
+- an Auto rotate On/Off control
 - Play/Pause and Reset controls
 - a live frame counter
 - playback using the dataset's reported FPS
 
-The visited-voxel heatmap remains visible while the trajectories are progressively drawn.
+The visited-voxel heatmap remains visible while the trajectories are progressively drawn. Automatic rotation pauses during manual camera interaction and resumes from the updated camera position after release.
 
 ## Aggregate many episodes
 
@@ -157,11 +162,16 @@ A real validation using episodes 0 through 9 produced:
 
 ## Coordinate frames
 
-The `visualize-workspace` and `interactive-workspace` commands retain separate left and right panels using their respective local `base_link` frames. Those panels must not be interpreted as sharing one common world coordinate frame.
+The `visualize-workspace` command retains separate left and right panels using their respective local `base_link` frames. Those static panels must not be interpreted as sharing one common world coordinate frame.
 
-The `aggregate-workspace` command instead applies configurable rigid arm-base transforms after forward kinematics and before voxelization. It renders the transformed left and right coverage in one shared world-space 3D scene.
+The `interactive-workspace` and `aggregate-workspace` commands apply configurable rigid arm-base transforms after forward kinematics and before voxelization. Both render the transformed left and right coverage in one shared world-space 3D scene. The interactive command also includes trajectory playback and automatic camera rotation.
 
-The current default shared-frame convention places the bases laterally along world Y with zero roll, pitch, and yaw. The spacing is configurable through `--arm-spacing`; its default `0.8 m` value is provisional and should not be treated as calibrated physical geometry.
+The current default shared-frame convention places the bases laterally along world Y with zero roll, pitch, and yaw:
+
+- left base: `(0, +arm_spacing / 2, 0)`
+- right base: `(0, -arm_spacing / 2, 0)`
+
+The spacing is configurable through `--arm-spacing`; its default `0.8 m` value is provisional and should not be treated as calibrated physical geometry.
 
 ## Example validation
 
@@ -169,11 +179,14 @@ The interactive workflow was validated using episodes 0, 1, and 2 from:
 
     DreamMachines/actuator_unboxing_4h_diverse
 
-At a voxel size of `0.020 m`, the generated visualization contained:
+At a voxel size of `0.020 m` and provisional `0.8 m` lateral arm spacing, the generated visualization contained:
 
 - 2,838 trajectory points across both arms
-- 423 occupied voxels
+- 423 arm-specific occupied-voxel entries
+- one shared dual-arm world-space scene
 - playback at the dataset's native 50 FPS
+- synchronized automatic camera rotation
+- manual rotation, zoom, and pan during playback
 - a self-contained offline HTML file
 
 ## Development
