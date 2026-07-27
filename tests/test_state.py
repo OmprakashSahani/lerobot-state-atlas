@@ -81,6 +81,34 @@ def test_load_state_batch_requires_an_episode() -> None:
         load_state_batch("organization/dataset", [])
 
 
+def test_load_state_batch_uses_resolved_revision(monkeypatch) -> None:
+    calls: list[tuple[str, list[int], str | None, bool]] = []
+
+    class FakeDataset:
+        def __init__(
+            self,
+            repo_id: str,
+            *,
+            episodes: list[int],
+            revision: str | None,
+            download_videos: bool,
+        ) -> None:
+            calls.append((repo_id, episodes, revision, download_videos))
+            self.hf_dataset = FakeTabularDataset()
+
+    monkeypatch.setattr("lerobot.datasets.LeRobotDataset", FakeDataset)
+
+    load_state_batch(
+        "organization/dataset",
+        [0],
+        revision="a" * 40,
+    )
+
+    assert calls == [
+        ("organization/dataset", [0], "a" * 40, False),
+    ]
+
+
 def test_iter_state_batches_loads_bounded_episode_chunks(
     monkeypatch,
 ) -> None:
@@ -131,6 +159,38 @@ def test_iter_state_batches_requires_an_episode() -> None:
                 episode_batch_size=4,
             )
         )
+
+
+def test_iter_state_batches_threads_resolved_revision(monkeypatch) -> None:
+    calls: list[tuple[str, tuple[int, ...], str]] = []
+
+    def fake_load_state_batch(
+        repo_id: str,
+        episodes: tuple[int, ...],
+        *,
+        revision: str,
+    ) -> SimpleNamespace:
+        calls.append((repo_id, tuple(episodes), revision))
+        return SimpleNamespace(episodes=tuple(episodes))
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.state.load_state_batch",
+        fake_load_state_batch,
+    )
+
+    tuple(
+        iter_state_batches(
+            "organization/dataset",
+            [0, 1],
+            episode_batch_size=1,
+            revision="a" * 40,
+        )
+    )
+
+    assert calls == [
+        ("organization/dataset", (0,), "a" * 40),
+        ("organization/dataset", (1,), "a" * 40),
+    ]
 
 
 @pytest.mark.parametrize("episode_batch_size", [0, -1])

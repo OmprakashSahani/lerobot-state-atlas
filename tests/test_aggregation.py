@@ -33,10 +33,12 @@ def test_aggregate_workspace_coverages_processes_bounded_batches(
         episodes: list[int],
         *,
         episode_batch_size: int,
+        revision: str,
     ):
         calls["repo_id"] = repo_id
         calls["episodes"] = episodes
         calls["episode_batch_size"] = episode_batch_size
+        calls["revision"] = revision
         yield from batches
 
     monkeypatch.setattr(
@@ -93,11 +95,13 @@ def test_aggregate_workspace_coverages_processes_bounded_batches(
         model=object(),
         voxel_size=0.5,
         episode_batch_size=2,
+        revision="a" * 40,
     )
 
     assert calls["repo_id"] == "organization/dataset"
     assert calls["episodes"] == (0, 1, 2)
     assert calls["episode_batch_size"] == 2
+    assert calls["revision"] == "a" * 40
     assert calls["arms"] == ["left", "right", "left", "right"]
 
     assert result.num_batches == 2

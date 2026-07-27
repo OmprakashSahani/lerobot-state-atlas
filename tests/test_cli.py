@@ -45,8 +45,9 @@ def make_summary(
 ) -> DatasetSummary:
     return DatasetSummary(
         repo_id="DreamMachines/example",
-        revision="v3.0",
-        codebase_version="v3.0",
+        requested_revision="v3.0",
+        resolved_revision="a" * 40,
+        lerobot_codebase_version="v3.0",
         robot_type="bi_dk1_follower",
         fps=50.0,
         total_episodes=1344,
@@ -78,6 +79,13 @@ def test_version() -> None:
 
     assert result.exit_code == 0
     assert "lerobot-state-atlas 0.1.0" in result.stdout
+
+
+def test_export_browser_data_help_includes_dataset_revision() -> None:
+    result = runner.invoke(app, ["export-browser-data", "--help"])
+
+    assert result.exit_code == 0
+    assert "--dataset-revision" in result.stdout
 
 
 def test_inspect_command(monkeypatch) -> None:
@@ -170,9 +178,12 @@ def test_visualize_workspace_command(
     def fake_load_batch(
         repo_id: str,
         episodes: list[int],
+        *,
+        revision: str,
     ) -> SimpleNamespace:
         calls["batch_repo_id"] = repo_id
         calls["episodes"] = episodes
+        calls["revision"] = revision
         return batch
 
     def fake_load_model(path: Path) -> object:
@@ -424,6 +435,8 @@ def test_visualize_workspace_reports_pipeline_error(
     def raise_error(
         repo_id: str,
         episodes: list[int],
+        *,
+        revision: str,
     ) -> None:
         raise RuntimeError("Episode download failed")
 
@@ -482,8 +495,11 @@ def test_visualize_workspace_accepts_multiple_episodes(
     def fake_load_batch(
         repo_id: str,
         episodes: list[int],
+        *,
+        revision: str,
     ) -> SimpleNamespace:
         calls["episodes"] = episodes
+        calls["revision"] = revision
         return batch
 
     monkeypatch.setattr(
@@ -669,9 +685,12 @@ def test_interactive_workspace_command(
     def fake_load_batch(
         repo_id: str,
         episodes: list[int],
+        *,
+        revision: str,
     ) -> SimpleNamespace:
         calls["repo_id"] = repo_id
         calls["episodes"] = episodes
+        calls["revision"] = revision
         return batch
 
     monkeypatch.setattr(
@@ -877,6 +896,7 @@ def test_aggregate_workspace_command(
         voxel_size: float,
         episode_batch_size: int,
         arm_transforms: object,
+        revision: str,
     ) -> SimpleNamespace:
         calls["repo_id"] = repo_id
         calls["episodes"] = episodes
@@ -885,6 +905,7 @@ def test_aggregate_workspace_command(
         calls["voxel_size"] = voxel_size
         calls["episode_batch_size"] = episode_batch_size
         calls["arm_transforms"] = arm_transforms
+        calls["revision"] = revision
 
         return SimpleNamespace(
             coverages=coverages,

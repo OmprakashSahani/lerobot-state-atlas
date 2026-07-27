@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OmprakashSahani/lerobot-state-atlas/schemas/browser-data-v1.schema.json",
+  "title": "LeRobot State Atlas browser data v1.0",
+  "description": "Structural schema for manifest, coverage, and optional trajectory documents. Cross-file checksums, CSR consistency, aggregate totals, ordering, and path safety are enforced by validate-browser-data.",
+  "oneOf": [
+    { "$ref": "#/$defs/manifest" },
+    { "$ref": "#/$defs/coveragePayload" },
+    { "$ref": "#/$defs/trajectoryPayload" }
+  ],
+  "$defs": {
+    "schemaVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "major", "minor"],
+      "properties": {
+        "name": { "const": "lerobot-state-atlas.browser-data" },
+        "major": { "const": 1 },
+        "minor": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "vector3": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "items": false
+    },
+    "integerVector3": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "integer" },
+        { "type": "integer" },
+        { "type": "integer" }
+      ],
+      "items": false
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["translationXyz", "rotationRpy"],
+      "properties": {
+        "translationXyz": { "$ref": "#/$defs/vector3" },
+        "rotationRpy": { "$ref": "#/$defs/vector3" }
+      }
+    },
+    "payloadReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "filename",
+        "required",
+        "encoding",
+        "byteSize",
+        "sha256"
+      ],
+      "properties": {
+        "kind": { "enum": ["coverage", "trajectories"] },
+        "filename": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "encoding": { "const": "json" },
+        "byteSize": { "type": "integer", "minimum": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "bundleId",
+        "exporter",
+        "dataset",
+        "robot",
+        "coverage",
+        "coordinates",
+        "totals",
+        "sceneBounds",
+        "payloads"
+      ],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "bundleId": { "type": "string", "minLength": 1 },
+        "exporter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "packageVersion",
+            "repositoryHeadCommit",
+            "workingTreeDirty",
+            "sourceDescription",
+            "determinism"
+          ],
+          "properties": {
+            "packageVersion": { "type": "string", "minLength": 1 },
+            "repositoryHeadCommit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "workingTreeDirty": { "type": "boolean" },
+            "sourceDescription": { "type": "string", "minLength": 1 },
+            "determinism": { "type": "string", "minLength": 1 }
+          }
+        },
+        "dataset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "requestedRevision",
+            "resolvedRevision",
+            "lerobotCodebaseVersion",
+            "lerobotPackageVersion",
+            "robotType",
+            "fps",
+            "episodeIds",
+            "episodeCount",
+            "datasetFrameCount"
+          ],
+          "properties": {
+            "repositoryId": { "type": "string", "minLength": 1 },
+            "requestedRevision": { "type": "string", "minLength": 1 },
+            "resolvedRevision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "lerobotCodebaseVersion": { "type": "string", "minLength": 1 },
+            "lerobotPackageVersion": { "type": "string", "minLength": 1 },
+            "robotType": { "type": ["string", "null"] },
+            "fps": { "type": "number", "exclusiveMinimum": 0 },
+            "episodeIds": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "integer", "minimum": 0 }
+            },
+            "episodeCount": { "type": "integer", "minimum": 1 },
+            "datasetFrameCount": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "robot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "modelName",
+            "rootLink",
+            "toolLinks",
+            "urdfSha256",
+            "urdfUpstreamIdentity"
+          ],
+          "properties": {
+            "modelName": { "type": "string", "minLength": 1 },
+            "rootLink": { "type": "string", "minLength": 1 },
+            "toolLinks": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["left", "right"],
+              "properties": {
+                "left": { "type": "string", "minLength": 1 },
+                "right": { "type": "string", "minLength": 1 }
+              }
+            },
+            "urdfSha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "urdfUpstreamIdentity": { "type": "string", "minLength": 1 }
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "voxelSize",
+            "voxelOrigin",
+            "canonicalTransforms",
+            "armSpacing",
+            "spacingCalibrated",
+            "spacingDisclosure"
+          ],
+          "properties": {
+            "voxelSize": { "type": "number", "exclusiveMinimum": 0 },
+            "voxelOrigin": { "$ref": "#/$defs/vector3" },
+            "canonicalTransforms": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["left", "right"],
+              "properties": {
+                "left": { "$ref": "#/$defs/transform" },
+                "right": { "$ref": "#/$defs/transform" }
+              }
+            },
+            "armSpacing": { "type": "number", "exclusiveMinimum": 0 },
+            "spacingCalibrated": { "const": false },
+            "spacingDisclosure": { "type": "string", "minLength": 1 }
+          }
+        },
+        "coordinates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lengthUnit",
+            "angleUnit",
+            "handedness",
+            "positionFrame",
+            "voxelIndexFormula",
+            "rotationConvention",
+            "pointTransform"
+          ],
+          "properties": {
+            "lengthUnit": { "const": "metre" },
+            "angleUnit": { "const": "radian" },
+            "handedness": { "const": "right-handed" },
+            "positionFrame": { "const": "canonical-shared-world" },
+            "voxelIndexFormula": { "type": "string", "minLength": 1 },
+            "rotationConvention": { "type": "string", "minLength": 1 },
+            "pointTransform": { "type": "string", "minLength": 1 }
+          }
+        },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "datasetFrameCount",
+            "toolPointVisitCount",
+            "armVoxelEntryCount",
+            "uniqueSharedGridCellCount"
+          ],
+          "properties": {
+            "datasetFrameCount": { "type": "integer", "minimum": 1 },
+            "toolPointVisitCount": { "type": "integer", "minimum": 1 },
+            "armVoxelEntryCount": { "type": "integer", "minimum": 1 },
+            "uniqueSharedGridCellCount": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "sceneBounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimumXyz", "maximumXyz"],
+          "properties": {
+            "minimumXyz": { "$ref": "#/$defs/vector3" },
+            "maximumXyz": { "$ref": "#/$defs/vector3" }
+          }
+        },
+        "payloads": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/payloadReference" }
+        }
+      }
+    },
+    "coverageArm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arm",
+        "toolLink",
+        "voxelIndices",
+        "visitCounts",
+        "episodeCounts",
+        "episodeIdOffsets",
+        "episodeIds",
+        "statistics"
+      ],
+      "properties": {
+        "arm": { "enum": ["left", "right"] },
+        "toolLink": { "type": "string", "minLength": 1 },
+        "voxelIndices": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/integerVector3" }
+        },
+        "visitCounts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "episodeCounts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "episodeIdOffsets": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "episodeIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "statistics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "voxelEntryCount",
+            "minimumVisitCount",
+            "maximumVisitCount",
+            "minimumEpisodeCount",
+            "maximumEpisodeCount"
+          ],
+          "properties": {
+            "voxelEntryCount": { "type": "integer", "minimum": 1 },
+            "minimumVisitCount": { "type": "integer", "minimum": 1 },
+            "maximumVisitCount": { "type": "integer", "minimum": 1 },
+            "minimumEpisodeCount": { "type": "integer", "minimum": 1 },
+            "maximumEpisodeCount": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "coveragePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "arms"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "arms": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/coverageArm" }
+        }
+      }
+    },
+    "trajectoryEpisode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "episodeId",
+        "frameIndices",
+        "timestampsSeconds",
+        "leftPositionsXyz",
+        "rightPositionsXyz"
+      ],
+      "properties": {
+        "episodeId": { "type": "integer", "minimum": 0 },
+        "frameIndices": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "timestampsSeconds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number" }
+        },
+        "leftPositionsXyz": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/vector3" }
+        },
+        "rightPositionsXyz": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/vector3" }
+        }
+      }
+    },
+    "trajectoryPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "episodes"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "episodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/trajectoryEpisode" }
+        }
+      }
+    }
+  }
+}
