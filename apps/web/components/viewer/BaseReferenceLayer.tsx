@@ -1,6 +1,7 @@
 "use client";
 
 import type { AtlasManifest } from "@/lib/atlas-schema/types";
+import { applyRuntimeSpacing } from "@/lib/coordinates/runtimeSpacing";
 
 function BaseReference({
   arm,
@@ -21,16 +22,32 @@ function BaseReference({
   );
 }
 
-export function BaseReferenceLayer({ manifest }: { manifest: AtlasManifest }) {
+export function BaseReferenceLayer({
+  manifest,
+  spacing,
+}: {
+  manifest: AtlasManifest;
+  spacing: number;
+}) {
   return (
     <group name="robot-base-references">
       <BaseReference
         arm="left"
-        position={manifest.coverage.canonicalTransforms.left.translationXyz}
+        position={applyRuntimeSpacing(
+          manifest.coverage.canonicalTransforms.left.translationXyz,
+          "left",
+          spacing,
+          manifest.coverage.armSpacing,
+        )}
       />
       <BaseReference
         arm="right"
-        position={manifest.coverage.canonicalTransforms.right.translationXyz}
+        position={applyRuntimeSpacing(
+          manifest.coverage.canonicalTransforms.right.translationXyz,
+          "right",
+          spacing,
+          manifest.coverage.armSpacing,
+        )}
       />
     </group>
   );

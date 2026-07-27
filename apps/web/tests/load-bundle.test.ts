@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
 import coverageJson from "@/public/atlas-data/demo-v1/coverage.json";
-import { loadDemoBundle } from "@/lib/data/loadBundle";
+import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
+import { decodeManifest } from "@/lib/atlas-schema/validate";
+import { loadDemoBundle, loadTrajectories } from "@/lib/data/loadBundle";
 
 describe("bundle loading", () => {
   it("loads development manifest and coverage with no-store", async () => {
@@ -62,5 +64,29 @@ describe("bundle loading", () => {
     await expect(loadDemoBundle(fetcher)).rejects.toThrow(
       /Unable to load atlas manifest/,
     );
+  });
+
+  it("lazily requests the optional trajectory payload on activation", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify(trajectoriesJson), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const result = await loadTrajectories(
+      decodeManifest(manifestJson),
+      fetcher,
+      "development",
+    );
+    expect(fetcher).toHaveBeenCalledWith(
+      "/atlas-data/demo-v1/trajectories.json",
+      { cache: "no-store" },
+    );
+    expect(result.episodes.map((episode) => episode.episodeId)).toEqual([0, 1]);
+  });
+
+  it("handles a missing optional trajectory payload", async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 404 })) as
+      unknown as typeof fetch;
+    await expect(
+      loadTrajectories(decodeManifest(manifestJson), fetcher),
+    ).rejects.toThrow(/Unable to load trajectory payload/);
   });
 });

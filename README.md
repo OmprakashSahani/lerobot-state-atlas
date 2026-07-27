@@ -231,6 +231,52 @@ The web application reads deterministic browser-data schema v1.0 bundles. It
 does not run LeRobot, PyTorch, URDF parsing, or forward kinematics at request
 time.
 
+### Browser viewer features
+
+The statically deployed Next.js viewer keeps the schema v1 bundle immutable and
+loads only `manifest.json` followed by `coverage.json` on its initial path.
+Opening trajectory playback lazily requests the optional `trajectories.json`;
+missing or invalid optional trajectory data is reported without hiding coverage.
+
+Coverage can be coloured by three exact arm-specific metrics:
+
+- **Visits** uses the authoritative raw voxel visit count.
+- **Log visits** uses `log1p(raw visits)` for colour only and does not rewrite
+  payload values.
+- **Distinct episodes** is the exact number of episode IDs in the voxel's CSR
+  range.
+
+Each metric has one colour domain computed across both arms. Hiding an arm does
+not change that domain. Selected-voxel details always retain raw visits and the
+exact CSR episode count.
+
+Clicking a voxel starts an exact shared-world radius query around its centre.
+Membership uses Euclidean centre distance and includes arm-specific entries
+from both arms, including exact centre matches at zero radius. Results distinguish
+arm-specific entries from unique shared grid cells and report left, right, and
+total **tool-point visits**. One dataset frame can contribute two tool-point
+visits, one per arm. The distinct-episode result is the exact union of stored
+CSR episode IDs across all matching entries.
+
+Playback keeps both tool points synchronized, uses the validated dataset FPS,
+and advances from elapsed wall-clock time with selectable speed rather than
+advancing one dataset frame per browser render. Episode changes restart safely;
+the timeline supports immediate scrubbing, restart, and optional looping while
+coverage remains visible.
+
+The viewer also supports OrbitControls-based automatic rotation and manual
+orbit, pan, zoom, and camera reset. Runtime arm spacing is a display and query
+configuration relative to the exported baseline: the left arm receives
+`+(spacing - manifestSpacing) / 2` on world Y and the right arm receives the
+negative delta. The same adjustment applies to coverage, base references,
+selection queries, and trajectories. The manifest's current `0.8 m` baseline is
+provisional configurable geometry, not calibrated geometry.
+
+Gaussian-splat environments, scan upload, and calibration UI remain future
+work. The environment layer is intentionally independent of coverage,
+selection, and playback so those additions do not require coupling robotics
+data to a future environment renderer.
+
 Generate the pinned demo bundle:
 
     uv run lerobot-state-atlas export-browser-data \

@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from click import unstyle
+from click.testing import Result
 from typer.testing import CliRunner
 
 from lerobot_state_atlas.cli import app
@@ -22,6 +24,10 @@ runner = CliRunner()
 
 def compact_output(output: str) -> str:
     return "".join(output.split())
+
+
+def plain_output(result: Result) -> str:
+    return unstyle(result.stdout)
 
 
 def make_summary(
@@ -67,25 +73,27 @@ def make_summary(
 
 def test_help() -> None:
     result = runner.invoke(app, ["--help"])
+    output = plain_output(result)
 
     assert result.exit_code == 0
-    assert "Analyze state coverage" in result.stdout
-    assert "version" in result.stdout
-    assert "visualize-workspace" in result.stdout
+    assert "Analyze state coverage" in output
+    assert "version" in output
+    assert "visualize-workspace" in compact_output(output)
 
 
 def test_version() -> None:
     result = runner.invoke(app, ["version"])
 
     assert result.exit_code == 0
-    assert "lerobot-state-atlas 0.1.0" in result.stdout
+    assert "lerobot-state-atlas 0.1.0" in plain_output(result)
 
 
 def test_export_browser_data_help_includes_dataset_revision() -> None:
     result = runner.invoke(app, ["export-browser-data", "--help"])
+    output = compact_output(plain_output(result))
 
     assert result.exit_code == 0
-    assert "--dataset-revision" in result.stdout
+    assert "--dataset-revision" in output
 
 
 def test_inspect_command(monkeypatch) -> None:
@@ -102,11 +110,11 @@ def test_inspect_command(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
-    assert "DreamMachines/example" in result.stdout
-    assert "bi_dk1_follower" in result.stdout
-    assert "1,344" in result.stdout
-    assert "696,107" in result.stdout
-    assert "observation.state" in result.stdout
+    assert "DreamMachines/example" in plain_output(result)
+    assert "bi_dk1_follower" in plain_output(result)
+    assert "1,344" in plain_output(result)
+    assert "696,107" in plain_output(result)
+    assert "observation.state" in plain_output(result)
 
 
 def test_inspect_command_reports_loading_error(
@@ -126,8 +134,8 @@ def test_inspect_command_reports_loading_error(
     )
 
     assert result.exit_code == 1
-    assert "Failed to inspect dataset" in result.stdout
-    assert "Unable to load missing/dataset" in result.stdout
+    assert "Failed to inspect dataset" in plain_output(result)
+    assert "Unable to load missing/dataset" in plain_output(result)
 
 
 def test_visualize_workspace_help() -> None:
@@ -135,12 +143,13 @@ def test_visualize_workspace_help() -> None:
         app,
         ["visualize-workspace", "--help"],
     )
+    output = compact_output(plain_output(result))
 
     assert result.exit_code == 0
-    assert "--urdf" in result.stdout
-    assert "--episode" in result.stdout
-    assert "--voxel-size" in result.stdout
-    assert "--output" in result.stdout
+    assert "--urdf" in output
+    assert "--episode" in output
+    assert "--voxel-size" in output
+    assert "--output" in output
 
 
 def test_visualize_workspace_command(
@@ -314,11 +323,11 @@ def test_visualize_workspace_command(
     assert isinstance(trajectories, tuple)
     assert tuple(trajectory.arm for trajectory in trajectories) == ("left", "right")
 
-    assert "Saved workspace plot" in result.stdout
-    assert "workspace.png" in compact_output(result.stdout)
-    assert "Plotted 6 points" in result.stdout
-    assert "Voxel size: 0.050 m" in result.stdout
-    assert "localbase_linkframes" in compact_output(result.stdout)
+    assert "Saved workspace plot" in plain_output(result)
+    assert "workspace.png" in compact_output(plain_output(result))
+    assert "Plotted 6 points" in plain_output(result)
+    assert "Voxel size: 0.050 m" in plain_output(result)
+    assert "localbase_linkframes" in compact_output(plain_output(result))
 
 
 def test_visualize_workspace_rejects_negative_episode(
@@ -351,7 +360,7 @@ def test_visualize_workspace_rejects_negative_episode(
     )
 
     assert result.exit_code == 1
-    assert "Episode index must be nonnegative" in result.stdout
+    assert "Episode index must be nonnegative" in plain_output(result)
 
 
 @pytest.mark.parametrize(
@@ -389,7 +398,7 @@ def test_visualize_workspace_rejects_voxel_size(
     )
 
     assert result.exit_code == 1
-    assert "Voxel size must be finite and greater than zero" in result.stdout
+    assert "Voxel size must be finite and greater than zero" in plain_output(result)
 
 
 def test_visualize_workspace_rejects_missing_components(
@@ -416,7 +425,7 @@ def test_visualize_workspace_rejects_missing_components(
 
     assert result.exit_code == 1
     assert "observation.statedoesnotdefinecomponentnames" in compact_output(
-        result.stdout
+        plain_output(result)
     )
 
 
@@ -456,8 +465,8 @@ def test_visualize_workspace_reports_pipeline_error(
     )
 
     assert result.exit_code == 1
-    assert "Failed to visualize workspace" in result.stdout
-    assert "Episode download failed" in result.stdout
+    assert "Failed to visualize workspace" in plain_output(result)
+    assert "Episode download failed" in plain_output(result)
 
 
 def test_visualize_workspace_accepts_multiple_episodes(
@@ -598,7 +607,7 @@ def test_visualize_workspace_accepts_multiple_episodes(
     assert result.exit_code == 0
     assert calls["episodes"] == [2, 5]
     assert calls["title"] == ("TRLC-DK1 Episodes 2, 5 Tool Workspace")
-    assert "Plotted 8 points" in result.stdout
+    assert "Plotted 8 points" in plain_output(result)
 
 
 def test_visualize_workspace_rejects_duplicate_episodes(
@@ -633,7 +642,7 @@ def test_visualize_workspace_rejects_duplicate_episodes(
     )
 
     assert result.exit_code == 1
-    assert "Episode indices must be unique" in result.stdout
+    assert "Episode indices must be unique" in plain_output(result)
 
 
 def test_interactive_workspace_help() -> None:
@@ -641,13 +650,14 @@ def test_interactive_workspace_help() -> None:
         app,
         ["interactive-workspace", "--help"],
     )
+    output = compact_output(plain_output(result))
 
     assert result.exit_code == 0
-    assert "--urdf" in result.stdout
-    assert "--episode" in result.stdout
-    assert "--voxel-size" in result.stdout
-    assert "--arm-spacing" in result.stdout
-    assert "--output" in result.stdout
+    assert "--urdf" in output
+    assert "--episode" in output
+    assert "--voxel-size" in output
+    assert "--arm-spacing" in output
+    assert "--output" in output
 
 
 def test_interactive_workspace_command(
@@ -825,12 +835,12 @@ def test_interactive_workspace_command(
     assert calls["left_voxel_origin"] == (0.0, 0.0, 0.0)
     assert calls["right_voxel_origin"] == (0.0, 0.0, 0.0)
 
-    assert "Saved interactive workspace heatmap" in result.stdout
-    assert "Plotted 8 points" in result.stdout
-    assert "Occupied voxels: 6" in result.stdout
-    assert "Voxel size: 0.020 m" in result.stdout
-    assert "Arm base spacing: 0.800 m" in result.stdout
-    assert "sharedworldframe" in compact_output(result.stdout)
+    assert "Saved interactive workspace heatmap" in plain_output(result)
+    assert "Plotted 8 points" in plain_output(result)
+    assert "Occupied voxels: 6" in plain_output(result)
+    assert "Voxel size: 0.020 m" in plain_output(result)
+    assert "Arm base spacing: 0.800 m" in plain_output(result)
+    assert "sharedworldframe" in compact_output(plain_output(result))
 
 
 def test_aggregate_workspace_help() -> None:
@@ -838,15 +848,16 @@ def test_aggregate_workspace_help() -> None:
         app,
         ["aggregate-workspace", "--help"],
     )
+    output = compact_output(plain_output(result))
 
     assert result.exit_code == 0
-    assert "--urdf" in result.stdout
-    assert "--episode-start" in result.stdout
-    assert "--episode-end" in result.stdout
-    assert "--episode-batch-size" in result.stdout
-    assert "--voxel-size" in result.stdout
-    assert "--arm-spacing" in result.stdout
-    assert "--output" in result.stdout
+    assert "--urdf" in output
+    assert "--episode-start" in output
+    assert "--episode-end" in output
+    assert "--episode-batch-size" in output
+    assert "--voxel-size" in output
+    assert "--arm-spacing" in output
+    assert "--output" in output
 
 
 def test_aggregate_workspace_command(
@@ -983,14 +994,14 @@ def test_aggregate_workspace_command(
     assert calls["title"] == ("TRLC-DK1 Episodes 2-5 Shared Workspace Heatmap")
     assert calls["shared_space"] is True
 
-    assert "Saved aggregated workspace heatmap" in result.stdout
-    assert "Aggregated 4 episodes across 2 batches" in result.stdout
-    assert "Processed 10 dataset frames" in result.stdout
-    assert "20 dual-arm tool points" in result.stdout
-    assert "Occupied voxels: 7" in result.stdout
-    assert "Voxel size: 0.020 m" in result.stdout
-    assert "Arm base spacing: 0.800 m" in result.stdout
-    assert "sharedworldframe" in compact_output(result.stdout)
+    assert "Saved aggregated workspace heatmap" in plain_output(result)
+    assert "Aggregated 4 episodes across 2 batches" in plain_output(result)
+    assert "Processed 10 dataset frames" in plain_output(result)
+    assert "20 dual-arm tool points" in plain_output(result)
+    assert "Occupied voxels: 7" in plain_output(result)
+    assert "Voxel size: 0.020 m" in plain_output(result)
+    assert "Arm base spacing: 0.800 m" in plain_output(result)
+    assert "sharedworldframe" in compact_output(plain_output(result))
 
 
 @pytest.mark.parametrize(
@@ -1027,4 +1038,6 @@ def test_aggregate_workspace_rejects_invalid_arm_spacing(
     )
 
     assert result.exit_code == 1
-    assert "Armspacingmustbefiniteandgreaterthanzero" in compact_output(result.stdout)
+    assert "Armspacingmustbefiniteandgreaterthanzero" in compact_output(
+        plain_output(result)
+    )

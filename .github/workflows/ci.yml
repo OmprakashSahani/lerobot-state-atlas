@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Run Python tests
+        run: uv run pytest
+
+      - name: Run Ruff lint
+        run: uv run ruff check .
+
+      - name: Check Ruff formatting
+        run: uv run ruff format --check .
+
+      - name: Validate browser-data demo
+        run: >-
+          uv run lerobot-state-atlas validate-browser-data
+          apps/web/public/atlas-data/demo-v1
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Verify clean working tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(git status --porcelain --untracked-files=all)"
+          if [[ -n "${status}" ]]; then
+            echo "::error::Python validation created unexpected tracked or untracked files."
+            printf '%s\n' "${status}"
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Verify web library sources are tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_sources=(
+            apps/web/lib/atlas-schema/types.ts
+            apps/web/lib/atlas-schema/validate.ts
+            apps/web/lib/data/loadBundle.ts
+            apps/web/lib/data/prepareCoverage.ts
+            apps/web/lib/coordinates/transforms.ts
+          )
+          for source in "${required_sources[@]}"; do
+            if [[ ! -f "${source}" ]]; then
+              echo "::error file=${source}::Required web source is missing from the clean checkout."
+              exit 1
+            fi
+            if ! git ls-files --error-unmatch "${source}" >/dev/null; then
+              echo "::error file=${source}::Required web source exists but is not tracked by Git."
+              exit 1
+            fi
+          done
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Audit production dependencies
+        working-directory: apps/web
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run frontend lint
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Run frontend typecheck
+        working-directory: apps/web
+        run: npm run typecheck
+
+      - name: Run frontend tests
+        working-directory: apps/web
+        run: npm test
+
+      - name: Build frontend
+        working-directory: apps/web
+        run: npm run build
+
+      - name: Verify generated-file policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch apps/web/next-env.d.ts >/dev/null 2>&1; then
+            echo "::error::apps/web/next-env.d.ts must remain untracked."
+            exit 1
+          fi
+          git check-ignore --quiet apps/web/next-env.d.ts
+
+          tracked_outputs="$(
+            git ls-files |
+              grep -E '(^|/)(node_modules|\.next)(/|$)|apps/web/.*\.tsbuildinfo$' ||
+              true
+          )"
+          if [[ -n "${tracked_outputs}" ]]; then
+            echo "::error::Generated frontend outputs must not be tracked."
+            printf '%s\n' "${tracked_outputs}"
+            exit 1
+          fi
+
+          status="$(git status --porcelain --untracked-files=all)"
+          if [[ -n "${status}" ]]; then
+            echo "::error::Frontend validation created unexpected non-ignored files."
+            printf '%s\n' "${status}"
+            exit 1
+          fi
+
+      - name: Check whitespace
+        run: git diff --check
