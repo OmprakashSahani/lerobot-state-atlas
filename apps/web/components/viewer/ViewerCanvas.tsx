@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Box3, PerspectiveCamera, Sphere, Vector3 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-import type { AtlasData } from "@/lib/atlas-schema/types";
+import type { AtlasData, TrajectoryEpisode } from "@/lib/atlas-schema/types";
 
 import { EnvironmentLayer, gridEnvironment } from "./EnvironmentLayer";
 import { InteractionLayer } from "./InteractionLayer";
@@ -19,7 +19,7 @@ import { useViewerStore } from "./ViewerStore";
 function CameraController({ data }: { data: AtlasData }) {
   const { camera, gl } = useThree();
   const controls = useRef<OrbitControls | null>(null);
-  const { cameraResetToken } = useViewerStore();
+  const { cameraResetToken, autoRotate } = useViewerStore();
   const framing = useMemo(() => {
     const bounds = new Box3(
       new Vector3(...data.manifest.sceneBounds.minimumXyz),
@@ -35,6 +35,7 @@ function CameraController({ data }: { data: AtlasData }) {
     orbit.enableDamping = true;
     orbit.dampingFactor = 0.065;
     orbit.screenSpacePanning = true;
+    orbit.autoRotateSpeed = 1.2;
     orbit.minDistance = framing.radius * 0.45;
     orbit.maxDistance = framing.radius * 8;
     controls.current = orbit;
@@ -50,6 +51,10 @@ function CameraController({ data }: { data: AtlasData }) {
       controls.current = null;
     };
   }, [camera, framing.radius, gl.domElement]);
+
+  useEffect(() => {
+    if (controls.current) controls.current.autoRotate = autoRotate;
+  }, [autoRotate]);
 
   useEffect(() => {
     const perspective = camera as PerspectiveCamera;
@@ -71,7 +76,15 @@ function CameraController({ data }: { data: AtlasData }) {
   return null;
 }
 
-export function ViewerCanvas({ data }: { data: AtlasData }) {
+export function ViewerCanvas({
+  data,
+  episode,
+  playbackFrame,
+}: {
+  data: AtlasData;
+  episode: TrajectoryEpisode | null;
+  playbackFrame: number;
+}) {
   return (
     <Canvas
       camera={{ fov: 42 }}
@@ -90,7 +103,11 @@ export function ViewerCanvas({ data }: { data: AtlasData }) {
       />
       <EnvironmentLayer source={gridEnvironment} />
       <RobotDataLayer data={data} />
-      <InteractionLayer />
+      <InteractionLayer
+        data={data}
+        episode={episode}
+        playbackFrame={playbackFrame}
+      />
       <CameraController data={data} />
     </Canvas>
   );

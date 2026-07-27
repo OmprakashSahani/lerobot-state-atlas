@@ -6,11 +6,31 @@ import {
 } from "./lib/data/cachePolicy";
 
 const isDevelopment = process.env.NODE_ENV === "development";
+const isVercelPreview = process.env.VERCEL_ENV === "preview";
 const runtimeEnvironment = process.env.NODE_ENV as RuntimeEnvironment;
+
 const scriptSources = ["'self'", "'unsafe-inline'"];
+const styleSources = ["'self'", "'unsafe-inline'"];
+const imageSources = ["'self'", "data:", "blob:"];
+const fontSources = ["'self'"];
+const connectSources = ["'self'"];
+const frameSources = isVercelPreview
+  ? ["https://vercel.live"]
+  : ["'none'"];
 
 if (isDevelopment) {
   scriptSources.push("'unsafe-eval'");
+}
+
+if (isVercelPreview) {
+  scriptSources.push("https://vercel.live");
+  styleSources.push("https://vercel.live");
+  imageSources.push("https://vercel.live", "https://vercel.com");
+  fontSources.push("https://vercel.live", "https://assets.vercel.com");
+  connectSources.push(
+    "https://vercel.live",
+    "wss://ws-us3.pusher.com",
+  );
 }
 
 const securityHeaders = [
@@ -26,11 +46,12 @@ const securityHeaders = [
     value: [
       "default-src 'self'",
       `script-src ${scriptSources.join(" ")}`,
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self'",
-      "connect-src 'self'",
+      `style-src ${styleSources.join(" ")}`,
+      `img-src ${imageSources.join(" ")}`,
+      `font-src ${fontSources.join(" ")}`,
+      `connect-src ${connectSources.join(" ")}`,
       "worker-src 'self' blob:",
+      `frame-src ${frameSources.join(" ")}`,
       "object-src 'none'",
       "base-uri 'self'",
       "frame-ancestors 'none'",
