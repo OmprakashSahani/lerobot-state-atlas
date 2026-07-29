@@ -27,6 +27,9 @@ const metricDescriptions: Record<CoverageMetric, string> = {
   episodes: "Exact episodes represented by voxel CSR",
 };
 
+const MIN_ARM_SPACING = 0.2;
+const MAX_ARM_SPACING = 1.4;
+
 function formatMetric(value: number, metric: CoverageMetric) {
   return metric === "log-visits" ? value.toFixed(2) : value.toLocaleString();
 }
@@ -45,6 +48,7 @@ export function AtlasViewer() {
     loop: false,
   });
   const previousTime = useRef<number | null>(null);
+  const spacingInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (atlas.status === "ready" && viewer.spacing === 0.8) {
@@ -140,6 +144,25 @@ export function AtlasViewer() {
     ? Math.min(episode.frameIndices.length - 1, Math.floor(playback.frame))
     : 0;
 
+  const commitSpacingInput = () => {
+    const input = spacingInputRef.current;
+    const rawSpacing = input?.value.trim() ?? "";
+    const parsedSpacing = rawSpacing === "" ? Number.NaN : Number(rawSpacing);
+
+    if (!input || !Number.isFinite(parsedSpacing)) {
+      if (input) input.value = viewer.spacing.toFixed(2);
+      return;
+    }
+
+    const boundedSpacing = Math.min(
+      MAX_ARM_SPACING,
+      Math.max(MIN_ARM_SPACING, parsedSpacing),
+    );
+
+    input.value = boundedSpacing.toFixed(2);
+    viewer.setSpacing(boundedSpacing);
+  };
+
   return (
     <div className="viewer-shell">
       <section className="viewer-stage" aria-label="Interactive workspace scene">
@@ -177,9 +200,79 @@ export function AtlasViewer() {
           <label className="layer-toggle"><input checked={viewer.leftVisible} onChange={() => viewer.toggleArm("left")} type="checkbox" /><span className="arm-dot arm-dot-left" aria-hidden="true" />Left arm entries<strong>{preparedArms[0].visits.length.toLocaleString()}</strong></label>
           <label className="layer-toggle"><input checked={viewer.rightVisible} onChange={() => viewer.toggleArm("right")} type="checkbox" /><span className="arm-dot arm-dot-right" aria-hidden="true" />Right arm entries<strong>{preparedArms[1].visits.length.toLocaleString()}</strong></label>
           <label className="layer-toggle simple-toggle"><input checked={viewer.autoRotate} onChange={(event) => viewer.setAutoRotate(event.target.checked)} type="checkbox" />Auto rotate</label>
-          <label className="field-label" htmlFor="arm-spacing">Provisional arm spacing: {viewer.spacing.toFixed(2)} m</label>
-          <input id="arm-spacing" type="range" min="0.2" max="1.4" step="0.02" value={viewer.spacing} onChange={(event) => viewer.setSpacing(Number(event.target.value))} />
-          <button className="compact-button" type="button" onClick={() => viewer.setSpacing(manifest.coverage.armSpacing)}>Restore manifest spacing</button>
+        </section>
+
+        <section className="control-section robot-setup" aria-labelledby="robot-setup-heading">
+          <div className="section-title-row"><h2 id="robot-setup-heading">Robot setup</h2><span>Provisional geometry</span></div>
+          <p className="control-help">
+            Distance between the left and right arm bases in the shared world.
+            Both arms move symmetrically when this value changes.
+          </p>
+
+          <div className="spacing-current" aria-live="polite">
+            <span>Current shared-world spacing</span>
+            <strong>{viewer.spacing.toFixed(2)} m</strong>
+          </div>
+
+          <form
+            className="spacing-form"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              commitSpacingInput();
+            }}
+          >
+            <label className="field-label" htmlFor="arm-spacing-number">
+              Arm spacing (metres)
+            </label>
+            <div className="spacing-input-row">
+              <input
+                aria-describedby="arm-spacing-help"
+                defaultValue={viewer.spacing.toFixed(2)}
+                id="arm-spacing-number"
+                inputMode="decimal"
+                key={`arm-spacing-${viewer.spacing.toFixed(2)}`}
+                max={MAX_ARM_SPACING}
+                min={MIN_ARM_SPACING}
+                onBlur={commitSpacingInput}
+                ref={spacingInputRef}
+                step="0.01"
+                type="number"
+              />
+              <button className="compact-button" type="submit">
+                Apply spacing
+              </button>
+            </div>
+          </form>
+
+          <label className="field-label" htmlFor="arm-spacing-slider">
+            Arm spacing slider: {viewer.spacing.toFixed(2)} m
+          </label>
+          <input
+            id="arm-spacing-slider"
+            max={MAX_ARM_SPACING}
+            min={MIN_ARM_SPACING}
+            onChange={(event) => viewer.setSpacing(Number(event.target.value))}
+            step="0.02"
+            type="range"
+            value={viewer.spacing}
+          />
+
+          <small className="control-help" id="arm-spacing-help">
+            Allowed range: {MIN_ARM_SPACING.toFixed(2)}–{MAX_ARM_SPACING.toFixed(2)} m.
+            This changes only the runtime shared-world transform.
+          </small>
+
+          <div className="spacing-actions">
+            <button
+              className="compact-button"
+              type="button"
+              onClick={() => viewer.setSpacing(manifest.coverage.armSpacing)}
+            >
+              Restore manifest spacing
+            </button>
+            <small>Manifest baseline: {manifest.coverage.armSpacing.toFixed(2)} m</small>
+          </div>
         </section>
 
         <section className="control-section" aria-labelledby="query-heading">

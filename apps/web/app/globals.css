@@ -674,16 +674,22 @@ a {
 }
 
 .viewer-panel select,
-.viewer-panel input[type="range"] {
-  accent-color: var(--cyan);
+.viewer-panel input[type="range"],
+.viewer-panel input[type="number"] {
   width: 100%;
 }
 
-.viewer-panel select {
+.viewer-panel input[type="range"] {
+  accent-color: var(--cyan);
+}
+
+.viewer-panel select,
+.viewer-panel input[type="number"] {
   background: #0d2230;
   border: 1px solid var(--line);
   border-radius: 0;
   color: var(--ink);
+  font: inherit;
   padding: 0.58rem;
 }
 
@@ -692,6 +698,60 @@ a {
   font-size: 0.68rem;
   font-weight: 700;
   margin: 0.65rem 0 0.4rem;
+}
+
+.robot-setup > .control-help {
+  margin-top: 0;
+}
+
+.spacing-current {
+  align-items: center;
+  background: #0b1d2a;
+  border: 1px solid rgba(103, 232, 249, 0.22);
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.85rem;
+  padding: 0.72rem 0.8rem;
+}
+
+.spacing-current span {
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.spacing-current strong {
+  color: var(--cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.spacing-form {
+  margin-top: 0.8rem;
+}
+
+.spacing-input-row {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.spacing-input-row .compact-button {
+  white-space: nowrap;
+}
+
+.spacing-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.7rem;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+}
+
+.spacing-actions small {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.58rem;
+  text-align: right;
 }
 
 .control-help,

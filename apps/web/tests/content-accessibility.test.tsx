@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
@@ -17,8 +17,12 @@ import { prepareCoverage } from "@/lib/data/prepareCoverage";
 const manifest = decodeManifest(manifestJson);
 const coverage = decodeCoverage(coverageJson);
 const preparedArmsForTest = prepareCoverage(manifest, coverage);
+const setSpacingMock = vi.fn();
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setSpacingMock.mockClear();
+});
 
 vi.mock("@/components/viewer/AtlasDataProvider", () => ({
   useAtlasData: () => ({
@@ -50,7 +54,7 @@ vi.mock("@/components/viewer/ViewerStore", () => ({
     toggleArm: vi.fn(),
     resetCamera: vi.fn(),
     setMetric: vi.fn(),
-    setSpacing: vi.fn(),
+    setSpacing: setSpacingMock,
     setRadius: vi.fn(),
     selectVoxel: vi.fn(),
     clearSelection: vi.fn(),
@@ -99,7 +103,18 @@ describe("accessible product content", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Load playback" })).toBeVisible();
     expect(screen.getByLabelText("Auto rotate")).toBeVisible();
-    expect(screen.getByLabelText(/Provisional arm spacing/)).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Robot setup" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Arm spacing (metres)")).toHaveValue(0.8);
+    expect(screen.getByLabelText(/Arm spacing slider/)).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Apply spacing" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Restore manifest spacing" }),
+    ).toBeVisible();
+    expect(screen.getByText("Manifest baseline: 0.80 m")).toBeVisible();
     expect(screen.getByText(manifest.coverage.spacingDisclosure)).toBeVisible();
     expect(screen.getByText("Requested dataset ref")).toBeVisible();
     expect(screen.getByText("Resolved HF commit")).toBeVisible();
@@ -110,6 +125,36 @@ describe("accessible product content", () => {
     expect(
       screen.queryByText(manifest.exporter.sourceDescription),
     ).not.toBeInTheDocument();
+  });
+
+  it("applies, clamps, rejects, and restores arm spacing", () => {
+    render(<AtlasViewer />);
+
+    const input = screen.getByLabelText("Arm spacing (metres)");
+    const applyButton = screen.getByRole("button", {
+      name: "Apply spacing",
+    });
+
+    fireEvent.change(input, { target: { value: "1.15" } });
+    fireEvent.click(applyButton);
+    expect(setSpacingMock).toHaveBeenLastCalledWith(1.15);
+
+    fireEvent.change(input, { target: { value: "2.00" } });
+    fireEvent.click(applyButton);
+    expect(setSpacingMock).toHaveBeenLastCalledWith(1.4);
+
+    const callCountBeforeInvalidInput = setSpacingMock.mock.calls.length;
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.click(applyButton);
+    expect(setSpacingMock).toHaveBeenCalledTimes(callCountBeforeInvalidInput);
+    expect(input).toHaveValue(0.8);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Restore manifest spacing" }),
+    );
+    expect(setSpacingMock).toHaveBeenLastCalledWith(
+      manifest.coverage.armSpacing,
+    );
   });
 
   it("exposes accessible playback controls after lazy activation", async () => {
