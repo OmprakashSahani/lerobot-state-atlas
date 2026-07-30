@@ -115,7 +115,12 @@ def make_documents() -> tuple[dict, bytes, bytes]:
             }
         ],
     }
-    manifest, coverage, trajectory = build_browser_data_documents(
+    (
+        manifest,
+        coverage,
+        trajectory,
+        episode_video,
+    ) = build_browser_data_documents(
         bundle_id="test-demo-v1",
         summary=make_summary(),
         selected_episodes=(0, 1),
@@ -138,6 +143,7 @@ def make_documents() -> tuple[dict, bytes, bytes]:
         trajectory_payload=trajectory_payload,
     )
     assert trajectory is not None
+    assert episode_video is None
     return manifest, coverage, trajectory
 
 
@@ -153,6 +159,70 @@ def write_documents(
     (path / "trajectories.json").write_bytes(trajectory)
 
 
+def add_episode_video_documents(
+    path: Path,
+    manifest: dict,
+    *,
+    episode_id: int = 0,
+    media_filename: str = "media/episode-000000/top.mp4",
+    write_media: bool = True,
+) -> dict:
+    media_bytes = b"\x00\x00\x00\x18ftypmp42state-atlas-test-video"
+    payload = {
+        "schema": {
+            "name": "lerobot-state-atlas.browser-data",
+            "major": 1,
+            "minor": 1,
+        },
+        "defaultCameraId": "top",
+        "cameras": [
+            {
+                "cameraId": "top",
+                "datasetFeature": "observation.images.top",
+                "label": "Top camera",
+                "width": 224,
+                "height": 224,
+            }
+        ],
+        "episodes": [
+            {
+                "episodeId": episode_id,
+                "videos": [
+                    {
+                        "cameraId": "top",
+                        "filename": media_filename,
+                        "mimeType": "video/mp4",
+                        "fromTimestampSeconds": 0.0,
+                        "toTimestampSeconds": 0.04,
+                        "byteSize": len(media_bytes),
+                        "sha256": sha256_bytes(media_bytes),
+                    }
+                ],
+            }
+        ],
+    }
+    payload_bytes = deterministic_json_bytes(payload)
+    manifest["payloads"].append(
+        {
+            "kind": "episode-videos",
+            "filename": "episode-videos.json",
+            "required": False,
+            "encoding": "json",
+            "byteSize": len(payload_bytes),
+            "sha256": sha256_bytes(payload_bytes),
+        }
+    )
+    (path / "manifest.json").write_bytes(deterministic_json_bytes(manifest))
+    (path / "episode-videos.json").write_bytes(payload_bytes)
+
+    if write_media:
+        media_path = path / media_filename
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        media_path.write_bytes(media_bytes)
+
+    return payload
+
+
 def test_deterministic_serialization_and_manifest_generation() -> None:
     first = make_documents()
     second = make_documents()
@@ -162,7 +232,7 @@ def test_deterministic_serialization_and_manifest_generation() -> None:
     assert first[0]["schema"] == {
         "name": "lerobot-state-atlas.browser-data",
         "major": 1,
-        "minor": 0,
+        "minor": 1,
     }
     assert "generationTimestamp" not in first[0]
     assert first[0]["dataset"]["requestedRevision"] == "v3.0"
@@ -208,6 +278,70 @@ def test_documents_validate_against_published_json_schema() -> None:
     validator.validate(manifest)
     validator.validate(json.loads(coverage))
     validator.validate(json.loads(trajectory))
+
+
+def test_episode_video_payload_and_media_validate(tmp_path: Path) -> None:
+    manifest, coverage, trajectory = make_documents()
+    bundle = tmp_path / "bundle"
+    write_documents(bundle, manifest, coverage, trajectory)
+    payload = add_episode_video_documents(bundle, manifest)
+
+    validated = validate_browser_data(bundle)
+    schema_path = Path(__file__).parents[1] / "schemas" / "browser-data-v1.schema.json"
+    validator = Draft202012Validator(
+        json.loads(schema_path.read_text(encoding="utf-8"))
+    )
+
+    validator.validate(payload)
+    assert validated["schema"]["minor"] == 1
+    assert validated["payloads"][-1]["kind"] == "episode-videos"
+
+
+def test_missing_episode_video_media_is_rejected(tmp_path: Path) -> None:
+    manifest, coverage, trajectory = make_documents()
+    bundle = tmp_path / "bundle"
+    write_documents(bundle, manifest, coverage, trajectory)
+    add_episode_video_documents(
+        bundle,
+        manifest,
+        write_media=False,
+    )
+
+    with pytest.raises(BrowserDataValidationError, match="Missing episode-video media"):
+        validate_browser_data(bundle)
+
+
+def test_episode_video_path_traversal_is_rejected(tmp_path: Path) -> None:
+    manifest, coverage, trajectory = make_documents()
+    bundle = tmp_path / "bundle"
+    write_documents(bundle, manifest, coverage, trajectory)
+    add_episode_video_documents(
+        bundle,
+        manifest,
+        media_filename="../private.mp4",
+        write_media=False,
+    )
+
+    with pytest.raises(BrowserDataValidationError, match="safe bundle-relative"):
+        validate_browser_data(bundle)
+
+
+def test_episode_video_episode_requires_trajectory_data(tmp_path: Path) -> None:
+    manifest, coverage, trajectory = make_documents()
+    bundle = tmp_path / "bundle"
+    write_documents(bundle, manifest, coverage, trajectory)
+    add_episode_video_documents(
+        bundle,
+        manifest,
+        episode_id=1,
+        media_filename="media/episode-000001/top.mp4",
+    )
+
+    with pytest.raises(
+        BrowserDataValidationError,
+        match="trajectory episode selection",
+    ):
+        validate_browser_data(bundle)
 
 
 def test_atomic_writer_replaces_existing_valid_bundle(tmp_path: Path) -> None:
@@ -327,3 +461,111 @@ def test_git_source_provenance_detects_clean_and_untracked_states(
     dirty = _git_source_provenance(repository)
     assert dirty.working_tree_dirty is True
     assert dirty.repository_head_commit == clean.repository_head_commit
+
+
+def _episode_video_export_fixture() -> tuple[dict, bytes, str]:
+    media_bytes = b"\x00\x00\x00\x18ftypmp42exporter-media-test"
+    filename = "media/episode-000000/top.mp4"
+    payload = {
+        "schema": {
+            "name": "lerobot-state-atlas.browser-data",
+            "major": 1,
+            "minor": 1,
+        },
+        "defaultCameraId": "top",
+        "cameras": [
+            {
+                "cameraId": "top",
+                "datasetFeature": "observation.images.top",
+                "label": "Top camera",
+                "width": 224,
+                "height": 224,
+            }
+        ],
+        "episodes": [
+            {
+                "episodeId": 0,
+                "videos": [
+                    {
+                        "cameraId": "top",
+                        "filename": filename,
+                        "mimeType": "video/mp4",
+                        "fromTimestampSeconds": 0.0,
+                        "toTimestampSeconds": 0.04,
+                        "byteSize": len(media_bytes),
+                        "sha256": sha256_bytes(media_bytes),
+                    }
+                ],
+            }
+        ],
+    }
+    return payload, media_bytes, filename
+
+
+def _add_episode_video_reference(
+    manifest: dict,
+    payload_bytes: bytes,
+) -> None:
+    manifest["payloads"].append(
+        {
+            "kind": "episode-videos",
+            "filename": "episode-videos.json",
+            "required": False,
+            "encoding": "json",
+            "byteSize": len(payload_bytes),
+            "sha256": sha256_bytes(payload_bytes),
+        }
+    )
+
+
+def test_atomic_writer_packages_episode_video_media(tmp_path: Path) -> None:
+    manifest, coverage, trajectory = make_documents()
+    payload, media_bytes, filename = _episode_video_export_fixture()
+    payload_bytes = deterministic_json_bytes(payload)
+    _add_episode_video_reference(manifest, payload_bytes)
+
+    source = tmp_path / "top-source.mp4"
+    source.write_bytes(media_bytes)
+    destination = tmp_path / "bundle"
+
+    result = _write_bundle(
+        destination,
+        manifest,
+        coverage,
+        trajectory,
+        payload_bytes,
+        {filename: source},
+    )
+
+    assert validate_browser_data(destination)["bundleId"] == "test-demo-v1"
+    assert (destination / "episode-videos.json").read_bytes() == payload_bytes
+    assert (destination / filename).read_bytes() == media_bytes
+    assert result.payload_byte_count == sum(
+        payload["byteSize"] for payload in manifest["payloads"]
+    )
+
+
+def test_media_mapping_failure_preserves_existing_bundle(tmp_path: Path) -> None:
+    manifest, coverage, trajectory = make_documents()
+    payload, _, _ = _episode_video_export_fixture()
+    payload_bytes = deterministic_json_bytes(payload)
+    _add_episode_video_reference(manifest, payload_bytes)
+
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    marker = destination / "existing.txt"
+    marker.write_text("preserve me", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exactly match"):
+        _write_bundle(
+            destination,
+            manifest,
+            coverage,
+            trajectory,
+            payload_bytes,
+            {},
+        )
+
+    assert marker.read_text(encoding="utf-8") == "preserve me"
+    assert not list(tmp_path.glob(".bundle.previous-*"))
+    assert not list(tmp_path.glob(".bundle.*"))

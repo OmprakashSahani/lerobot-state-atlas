@@ -2,13 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { TrajectoryPayload } from "@/lib/atlas-schema/types";
+import type {
+  EpisodeVideoPayload,
+  TrajectoryPayload,
+} from "@/lib/atlas-schema/types";
 import { metricDomain, metricLabels, type CoverageMetric } from "@/lib/data/metrics";
-import { loadTrajectories } from "@/lib/data/loadBundle";
+import {
+  episodeVideoAssetUrl,
+  loadEpisodeVideos,
+  loadTrajectories,
+} from "@/lib/data/loadBundle";
 import { queryRadius } from "@/lib/data/radiusQuery";
 import {
   advancePlayback,
+  episodeVideoTime,
   formatPlaybackStatus,
+  shouldSeekEpisodeVideo,
   type PlaybackState,
 } from "@/lib/playback/controller";
 import { ViewerCanvas } from "./ViewerCanvas";
@@ -20,6 +29,12 @@ type TrajectoryState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; data: TrajectoryPayload };
+
+type EpisodeVideoState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; data: EpisodeVideoPayload };
 
 const metricDescriptions: Record<CoverageMetric, string> = {
   visits: "Raw arm-specific tool-point visits",
@@ -41,6 +56,10 @@ export function AtlasViewer() {
     status: "idle",
   });
   const [episodeId, setEpisodeId] = useState<number | null>(null);
+  const [episodeVideos, setEpisodeVideos] = useState<EpisodeVideoState>({
+    status: "idle",
+  });
+  const [cameraId, setCameraId] = useState<string | null>(null);
   const [playback, setPlayback] = useState<PlaybackState>({
     frame: 0,
     playing: false,
@@ -48,6 +67,8 @@ export function AtlasViewer() {
     loop: false,
   });
   const previousTime = useRef<number | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const previousVideoSource = useRef<string | null>(null);
   const spacingInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -65,6 +86,27 @@ export function AtlasViewer() {
       .then((data) => {
         setTrajectories({ status: "ready", data });
         setEpisodeId(data.episodes[0].episodeId);
+        if (
+          atlas.data.manifest.payloads.some(
+            (payload) => payload.kind === "episode-videos",
+          )
+        ) {
+          setEpisodeVideos({ status: "loading" });
+          loadEpisodeVideos(atlas.data.manifest)
+            .then((videoData) => {
+              setEpisodeVideos({ status: "ready", data: videoData });
+              setCameraId(videoData.defaultCameraId);
+            })
+            .catch((error: unknown) =>
+              setEpisodeVideos({
+                status: "error",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Synchronized episode video failed to load.",
+              }),
+            );
+        }
       })
       .catch((error: unknown) =>
         setTrajectories({
@@ -77,6 +119,19 @@ export function AtlasViewer() {
   const episode =
     trajectories.status === "ready"
       ? trajectories.data.episodes.find((item) => item.episodeId === episodeId) ?? null
+      : null;
+  const videoEpisode =
+    episodeVideos.status === "ready"
+      ? episodeVideos.data.episodes.find(
+          (item) => item.episodeId === episodeId,
+        ) ?? null
+      : null;
+  const videoSource =
+    videoEpisode?.videos.find((item) => item.cameraId === cameraId) ?? null;
+  const videoCamera =
+    episodeVideos.status === "ready"
+      ? episodeVideos.data.cameras.find((item) => item.cameraId === cameraId) ??
+        null
       : null;
 
   useEffect(() => {
@@ -101,6 +156,39 @@ export function AtlasViewer() {
     animationFrame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animationFrame);
   }, [atlas, episode, playback.playing]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !episode || !videoSource) return;
+
+    const sourceChanged = previousVideoSource.current !== videoSource.filename;
+    previousVideoSource.current = videoSource.filename;
+    video.playbackRate = playback.speed;
+    const targetTime = episodeVideoTime(episode, videoSource, playback.frame);
+    if (
+      shouldSeekEpisodeVideo(
+        video.currentTime,
+        targetTime,
+        sourceChanged || !playback.playing,
+      )
+    ) {
+      video.currentTime = targetTime;
+    }
+
+    if (!playback.playing) {
+      video.pause();
+      return;
+    }
+
+    try {
+      const playResult = video.play();
+      playResult?.catch(() => {
+        // Autoplay policy can reject play(); atlas playback remains authoritative.
+      });
+    } catch {
+      // Media support and autoplay failures must not break trajectory controls.
+    }
+  }, [episode, playback.frame, playback.playing, playback.speed, videoSource]);
 
   if (atlas.status === "loading") {
     return <div className="viewer-status" role="status">Loading pinned atlas data…</div>;
@@ -165,15 +253,85 @@ export function AtlasViewer() {
 
   return (
     <div className="viewer-shell">
-      <section className="viewer-stage" aria-label="Interactive workspace scene">
-        <ViewerCanvas data={atlas.data} episode={episode} playbackFrame={playback.frame} />
-        <div className="scene-badge"><span className="live-dot" aria-hidden="true" />Canonical shared world</div>
-        <p className="scene-help">Click a voxel to query · Drag to orbit · Scroll to zoom</p>
-      </section>
+      <div className="viewer-visuals">
+        <section className="viewer-stage" aria-label="Interactive workspace scene">
+          <ViewerCanvas data={atlas.data} episode={episode} playbackFrame={playback.frame} />
+          <div className="scene-badge"><span className="live-dot" aria-hidden="true" />Canonical shared world</div>
+          <p className="scene-help">Click a voxel to query · Drag to orbit · Scroll to zoom</p>
+        </section>
+        <section className="episode-video-panel" aria-labelledby="episode-video-heading">
+          <div className="episode-video-heading">
+            <div>
+              <p className="eyebrow">Synchronized media</p>
+              <h2 id="episode-video-heading">Episode video</h2>
+            </div>
+            {episodeVideos.status === "ready" &&
+            episodeVideos.data.cameras.length > 1 ? (
+              <div>
+                <label htmlFor="video-camera">Camera</label>
+                <select
+                  id="video-camera"
+                  value={cameraId ?? ""}
+                  onChange={(event) => setCameraId(event.target.value)}
+                >
+                  {episodeVideos.data.cameras.map((camera) => (
+                    <option key={camera.cameraId} value={camera.cameraId}>
+                      {camera.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+          </div>
+          {!manifest.payloads.some(
+            (payload) => payload.kind === "episode-videos",
+          ) ? (
+            <p className="episode-video-message" role="note">
+              Synchronized episode video is not included in this bundle.
+            </p>
+          ) : null}
+          {episodeVideos.status === "idle" &&
+          manifest.payloads.some(
+            (payload) => payload.kind === "episode-videos",
+          ) ? (
+            <p className="episode-video-message">
+              Video metadata loads when trajectory playback is activated.
+            </p>
+          ) : null}
+          {episodeVideos.status === "loading" ? (
+            <p className="episode-video-message" role="status">
+              Loading synchronized video metadata…
+            </p>
+          ) : null}
+          {episodeVideos.status === "error" ? (
+            <p className="episode-video-message" role="note">
+              Synchronized episode video is unavailable. {episodeVideos.message}
+            </p>
+          ) : null}
+          {episodeVideos.status === "ready" && !videoSource ? (
+            <p className="episode-video-message" role="note">
+              No synchronized {videoCamera?.label.toLowerCase() ?? "camera"} video
+              is available for this episode.
+            </p>
+          ) : null}
+          {videoSource && videoCamera ? (
+            <video
+              aria-label={`${videoCamera.label} synchronized episode video`}
+              key={videoSource.filename}
+              playsInline
+              preload="metadata"
+              ref={videoRef}
+              src={episodeVideoAssetUrl(videoSource.filename)}
+            />
+          ) : null}
+        </section>
+      </div>
       <aside className="viewer-panel" aria-label="Viewer controls and metadata">
         <div className="panel-heading">
           <div><p className="eyebrow">Demo / episodes 0–9</p><h1>Workspace coverage</h1></div>
-          <span className="schema-chip">schema v1.0</span>
+          <span className="schema-chip">
+            schema v{manifest.schema.major}.{manifest.schema.minor}
+          </span>
         </div>
 
         <section className="control-section" aria-labelledby="metric-heading">

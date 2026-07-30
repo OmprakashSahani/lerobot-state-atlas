@@ -1,12 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/OmprakashSahani/lerobot-state-atlas/schemas/browser-data-v1.schema.json",
-  "title": "LeRobot State Atlas browser data v1.0",
-  "description": "Structural schema for manifest, coverage, and optional trajectory documents. Cross-file checksums, CSR consistency, aggregate totals, ordering, and path safety are enforced by validate-browser-data.",
+  "title": "LeRobot State Atlas browser data v1.1",
+  "description": "Structural schema for manifest, coverage, optional trajectory, and optional episode-video documents. Cross-file checksums, CSR consistency, aggregate totals, ordering, media integrity, and path safety are enforced by validate-browser-data.",
   "oneOf": [
     { "$ref": "#/$defs/manifest" },
     { "$ref": "#/$defs/coveragePayload" },
-    { "$ref": "#/$defs/trajectoryPayload" }
+    { "$ref": "#/$defs/trajectoryPayload" },
+    { "$ref": "#/$defs/episodeVideoPayload" }
   ],
   "$defs": {
     "schemaVersion": {
@@ -58,7 +59,7 @@
         "sha256"
       ],
       "properties": {
-        "kind": { "enum": ["coverage", "trajectories"] },
+        "kind": { "enum": ["coverage", "trajectories", "episode-videos"] },
         "filename": { "type": "string", "minLength": 1 },
         "required": { "type": "boolean" },
         "encoding": { "const": "json" },
@@ -376,6 +377,75 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/trajectoryEpisode" }
+        }
+      }
+    },
+    "episodeVideoCamera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cameraId", "datasetFeature", "label", "width", "height"],
+      "properties": {
+        "cameraId": { "type": "string", "minLength": 1 },
+        "datasetFeature": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "episodeVideoSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cameraId",
+        "filename",
+        "mimeType",
+        "fromTimestampSeconds",
+        "toTimestampSeconds",
+        "byteSize",
+        "sha256"
+      ],
+      "properties": {
+        "cameraId": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string", "minLength": 1 },
+        "mimeType": { "const": "video/mp4" },
+        "fromTimestampSeconds": { "type": "number", "minimum": 0 },
+        "toTimestampSeconds": { "type": "number", "exclusiveMinimum": 0 },
+        "byteSize": { "type": "integer", "minimum": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "episodeVideoEpisode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["episodeId", "videos"],
+      "properties": {
+        "episodeId": { "type": "integer", "minimum": 0 },
+        "videos": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/episodeVideoSource" }
+        }
+      }
+    },
+    "episodeVideoPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "defaultCameraId", "cameras", "episodes"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "defaultCameraId": { "type": "string", "minLength": 1 },
+        "cameras": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/episodeVideoCamera" }
+        },
+        "episodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/episodeVideoEpisode" }
         }
       }
     }

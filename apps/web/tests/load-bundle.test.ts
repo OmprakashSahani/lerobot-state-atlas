@@ -4,7 +4,63 @@ import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
 import coverageJson from "@/public/atlas-data/demo-v1/coverage.json";
 import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
 import { decodeManifest } from "@/lib/atlas-schema/validate";
-import { loadDemoBundle, loadTrajectories } from "@/lib/data/loadBundle";
+import {
+  loadDemoBundle,
+  loadEpisodeVideos,
+  loadTrajectories,
+} from "@/lib/data/loadBundle";
+
+const episodeVideosJson = {
+  schema: {
+    name: "lerobot-state-atlas.browser-data",
+    major: 1,
+    minor: 1,
+  },
+  defaultCameraId: "top",
+  cameras: [
+    {
+      cameraId: "top",
+      datasetFeature: "observation.images.top",
+      label: "Top camera",
+      width: 224,
+      height: 224,
+    },
+  ],
+  episodes: [
+    {
+      episodeId: 0,
+      videos: [
+        {
+          cameraId: "top",
+          filename: "media/episode-000000/top.mp4",
+          mimeType: "video/mp4",
+          fromTimestampSeconds: 0,
+          toTimestampSeconds: 10.3,
+          byteSize: 1234,
+          sha256: "a".repeat(64),
+        },
+      ],
+    },
+  ],
+};
+
+function manifestWithEpisodeVideos() {
+  return decodeManifest({
+    ...manifestJson,
+    schema: { ...manifestJson.schema, minor: 1 },
+    payloads: [
+      ...manifestJson.payloads,
+      {
+        kind: "episode-videos",
+        filename: "episode-videos.json",
+        required: false,
+        encoding: "json",
+        byteSize: 1234,
+        sha256: "b".repeat(64),
+      },
+    ],
+  });
+}
 
 describe("bundle loading", () => {
   it("loads development manifest and coverage with no-store", async () => {
@@ -32,6 +88,7 @@ describe("bundle loading", () => {
     expect(bundle.preparedArms).toHaveLength(2);
     expect(options).toEqual([{ cache: "no-store" }, { cache: "no-store" }]);
     expect(urls.some((url) => url.includes("trajectories"))).toBe(false);
+    expect(urls.some((url) => url.includes("episode-videos"))).toBe(false);
   });
 
   it("does not disable browser caching for production bundle requests", async () => {
@@ -55,6 +112,9 @@ describe("bundle loading", () => {
 
     expect(requests.map(({ init }) => init)).toEqual([undefined, undefined]);
     expect(requests.some(({ url }) => url.includes("trajectories"))).toBe(false);
+    expect(
+      requests.some(({ url }) => url.includes("episode-videos")),
+    ).toBe(false);
   });
 
   it("reports a useful HTTP error", async () => {
@@ -88,5 +148,40 @@ describe("bundle loading", () => {
     await expect(
       loadTrajectories(decodeManifest(manifestJson), fetcher),
     ).rejects.toThrow(/Unable to load trajectory payload/);
+  });
+
+  it("lazily requests episode-video metadata with the trajectory cache policy", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify(episodeVideosJson), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const result = await loadEpisodeVideos(
+      manifestWithEpisodeVideos(),
+      fetcher,
+      "development",
+    );
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/atlas-data/demo-v1/episode-videos.json",
+      { cache: "no-store" },
+    );
+    expect(result.defaultCameraId).toBe("top");
+  });
+
+  it("reports missing and invalid optional episode-video metadata", async () => {
+    const fetcher = vi.fn();
+    await expect(
+      loadEpisodeVideos(decodeManifest(manifestJson), fetcher),
+    ).rejects.toThrow(/does not include synchronized episode video/);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    const invalidFetcher = vi.fn(async () =>
+      new Response(JSON.stringify({ ...episodeVideosJson, cameras: [] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+    await expect(
+      loadEpisodeVideos(manifestWithEpisodeVideos(), invalidFetcher),
+    ).rejects.toThrow(/must contain cameras/);
   });
 });

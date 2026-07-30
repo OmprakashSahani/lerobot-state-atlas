@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 import json
 from math import isfinite
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath
 import re
 from typing import Any
 
@@ -15,6 +15,10 @@ from lerobot_state_atlas.browser_data.schema import (
     COVERAGE_PAYLOAD_FIELDS,
     COVERAGE_STATISTIC_FIELDS,
     DATASET_FIELDS,
+    EPISODE_VIDEO_CAMERA_FIELDS,
+    EPISODE_VIDEO_EPISODE_FIELDS,
+    EPISODE_VIDEO_PAYLOAD_FIELDS,
+    EPISODE_VIDEO_SOURCE_FIELDS,
     EXPORTER_FIELDS,
     MANIFEST_FIELDS,
     MANIFEST_FILENAME,
@@ -276,7 +280,7 @@ def _validate_manifest(manifest: Any) -> Mapping[str, Any]:
             payload["filename"],
             f"manifest.payloads[{index}].filename",
         )
-        if kind not in {"coverage", "trajectories"}:
+        if kind not in {"coverage", "trajectories", "episode-videos"}:
             _fail(f"Unsupported payload kind: {kind}.")
         if kind in kinds or filename in filenames:
             _fail("Payload kinds and filenames must be unique.")
@@ -407,7 +411,10 @@ def _validate_coverage(value: Any) -> dict[str, int]:
     }
 
 
-def _validate_trajectories(value: Any, selected_episodes: set[int]) -> None:
+def _validate_trajectories(
+    value: Any,
+    selected_episodes: set[int],
+) -> set[int]:
     payload = _object(value, TRAJECTORY_PAYLOAD_FIELDS, "trajectory payload")
     _schema(payload["schema"], "trajectory payload")
     episodes = payload["episodes"]
@@ -442,6 +449,215 @@ def _validate_trajectories(value: Any, selected_episodes: set[int]) -> None:
     if not set(episode_ids).issubset(selected_episodes):
         _fail("trajectory episodes must be included in the coverage episode selection.")
     _reject_absolute_paths(payload)
+    return set(episode_ids)
+
+
+def _relative_media_path(value: Any, label: str) -> PurePosixPath:
+    filename = _string(value, label)
+    path = PurePosixPath(filename)
+
+    if (
+        "\\" in filename
+        or "://" in filename
+        or any(character in filename for character in ":?#%")
+        or filename.startswith("//")
+        or re.match(r"^[A-Za-z]:", filename)
+        or path.is_absolute()
+        or not path.parts
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or path.as_posix() != filename
+    ):
+        _fail(f"{label} must be a safe bundle-relative POSIX path.")
+
+    if path.suffix.lower() != ".mp4":
+        _fail(f"{label} must reference an MP4 file.")
+
+    return path
+
+
+def _validate_episode_videos(
+    value: Any,
+    selected_episodes: set[int],
+    trajectory_episodes: set[int] | None,
+) -> list[Mapping[str, Any]]:
+    payload = _object(
+        value,
+        EPISODE_VIDEO_PAYLOAD_FIELDS,
+        "episode-video payload",
+    )
+    _schema(payload["schema"], "episode-video payload")
+
+    if payload["schema"]["minor"] < 1:
+        _fail("episode-video payload requires schema minor version 1 or newer.")
+
+    cameras = payload["cameras"]
+    if not isinstance(cameras, list) or not cameras:
+        _fail("episode-video payload cameras must be a non-empty array.")
+
+    camera_ids: list[str] = []
+    for index, camera_value in enumerate(cameras):
+        label = f"episode-video payload.cameras[{index}]"
+        camera = _object(
+            camera_value,
+            EPISODE_VIDEO_CAMERA_FIELDS,
+            label,
+        )
+        camera_id = _string(camera["cameraId"], f"{label}.cameraId")
+        camera_ids.append(camera_id)
+        _string(camera["datasetFeature"], f"{label}.datasetFeature")
+        _string(camera["label"], f"{label}.label")
+        _integer(camera["width"], f"{label}.width", minimum=1)
+        _integer(camera["height"], f"{label}.height", minimum=1)
+
+    if camera_ids != sorted(set(camera_ids)):
+        _fail("episode-video cameras must be sorted and distinct by cameraId.")
+
+    default_camera_id = _string(
+        payload["defaultCameraId"],
+        "episode-video payload.defaultCameraId",
+    )
+    if default_camera_id not in camera_ids:
+        _fail("episode-video defaultCameraId must identify a declared camera.")
+
+    if trajectory_episodes is None:
+        _fail("episode-video payload requires a trajectory payload.")
+
+    episodes = payload["episodes"]
+    if not isinstance(episodes, list) or not episodes:
+        _fail("episode-video payload episodes must be a non-empty array.")
+
+    episode_ids: list[int] = []
+    media_sources: list[Mapping[str, Any]] = []
+    media_filenames: set[str] = set()
+
+    for episode_index, episode_value in enumerate(episodes):
+        label = f"episode-video payload.episodes[{episode_index}]"
+        episode = _object(
+            episode_value,
+            EPISODE_VIDEO_EPISODE_FIELDS,
+            label,
+        )
+        episode_id = _integer(
+            episode["episodeId"],
+            f"{label}.episodeId",
+        )
+        episode_ids.append(episode_id)
+
+        videos = episode["videos"]
+        if not isinstance(videos, list) or not videos:
+            _fail(f"{label}.videos must be a non-empty array.")
+
+        source_camera_ids: list[str] = []
+
+        for source_index, source_value in enumerate(videos):
+            source_label = f"{label}.videos[{source_index}]"
+            source = _object(
+                source_value,
+                EPISODE_VIDEO_SOURCE_FIELDS,
+                source_label,
+            )
+
+            camera_id = _string(
+                source["cameraId"],
+                f"{source_label}.cameraId",
+            )
+            if camera_id not in camera_ids:
+                _fail(f"{source_label}.cameraId must identify a declared camera.")
+            source_camera_ids.append(camera_id)
+
+            media_path = _relative_media_path(
+                source["filename"],
+                f"{source_label}.filename",
+            )
+            media_filename = media_path.as_posix()
+            if media_filename in media_filenames:
+                _fail("Episode-video media filenames must be globally unique.")
+            media_filenames.add(media_filename)
+
+            if source["mimeType"] != "video/mp4":
+                _fail(f"{source_label}.mimeType must be 'video/mp4'.")
+
+            start = _number(
+                source["fromTimestampSeconds"],
+                f"{source_label}.fromTimestampSeconds",
+            )
+            end = _number(
+                source["toTimestampSeconds"],
+                f"{source_label}.toTimestampSeconds",
+            )
+            if end <= start:
+                _fail(
+                    f"{source_label}.toTimestampSeconds must be greater than "
+                    "fromTimestampSeconds."
+                )
+
+            _integer(
+                source["byteSize"],
+                f"{source_label}.byteSize",
+                minimum=1,
+            )
+            checksum = _string(
+                source["sha256"],
+                f"{source_label}.sha256",
+            )
+            if not re.fullmatch(r"[0-9a-f]{64}", checksum):
+                _fail(f"{source_label}.sha256 must be a lowercase SHA-256 digest.")
+
+            media_sources.append(source)
+
+        if source_camera_ids != sorted(set(source_camera_ids)):
+            _fail(f"{label}.videos must be sorted and distinct by cameraId.")
+
+        if default_camera_id not in source_camera_ids:
+            _fail(f"{label}.videos must include the default camera.")
+
+    if episode_ids != sorted(set(episode_ids)):
+        _fail("episode-video episodes must be sorted and distinct.")
+
+    if not set(episode_ids).issubset(selected_episodes):
+        _fail(
+            "episode-video episodes must be included in the coverage episode selection."
+        )
+
+    if not set(episode_ids).issubset(trajectory_episodes):
+        _fail(
+            "episode-video episodes must be included in the trajectory "
+            "episode selection."
+        )
+
+    _reject_absolute_paths(payload)
+    return media_sources
+
+
+def _validate_media_file(
+    bundle_path: Path,
+    source: Mapping[str, Any],
+) -> None:
+    relative = _relative_media_path(
+        source["filename"],
+        "episode-video media filename",
+    )
+    media_path = bundle_path.joinpath(*relative.parts)
+
+    try:
+        resolved_media = media_path.resolve(strict=True)
+    except FileNotFoundError:
+        _fail(f"Missing episode-video media: {relative.as_posix()}.")
+
+    resolved_bundle = bundle_path.resolve()
+    try:
+        resolved_media.relative_to(resolved_bundle)
+    except ValueError:
+        _fail("Episode-video media must resolve inside the browser-data bundle.")
+
+    if not resolved_media.is_file():
+        _fail(f"Episode-video media is not a file: {relative.as_posix()}.")
+
+    if resolved_media.stat().st_size != source["byteSize"]:
+        _fail(f"Episode-video media byte size does not match: {relative.as_posix()}.")
+
+    if sha256_file(resolved_media) != source["sha256"]:
+        _fail(f"Episode-video media checksum does not match: {relative.as_posix()}.")
 
 
 def validate_browser_data(path: str | Path) -> Mapping[str, Any]:
@@ -473,10 +689,25 @@ def validate_browser_data(path: str | Path) -> Mapping[str, Any]:
         if manifest["totals"][key] != expected:
             _fail(f"Manifest total does not match coverage payload: {key}.")
 
+    trajectory_episode_ids: set[int] | None = None
     if "trajectories" in payload_values:
-        _validate_trajectories(
+        trajectory_episode_ids = _validate_trajectories(
             payload_values["trajectories"],
             set(manifest["dataset"]["episodeIds"]),
         )
+
+    if "episode-videos" in payload_values:
+        if manifest["schema"]["minor"] < 1:
+            _fail(
+                "Episode-video payload requires manifest schema minor "
+                "version 1 or newer."
+            )
+        media_sources = _validate_episode_videos(
+            payload_values["episode-videos"],
+            set(manifest["dataset"]["episodeIds"]),
+            trajectory_episode_ids,
+        )
+        for source in media_sources:
+            _validate_media_file(bundle_path, source)
 
     return manifest

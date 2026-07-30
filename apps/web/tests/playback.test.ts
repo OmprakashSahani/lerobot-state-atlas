@@ -4,8 +4,11 @@ import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
 import { decodeTrajectories } from "@/lib/atlas-schema/validate";
 import {
   advancePlayback,
+  episodeVideoTime,
   formatPlaybackStatus,
   playbackPositions,
+  shouldSeekEpisodeVideo,
+  VIDEO_DRIFT_THRESHOLD_SECONDS,
 } from "@/lib/playback/controller";
 
 describe("trajectory playback", () => {
@@ -58,5 +61,31 @@ describe("trajectory playback", () => {
     const invalid = structuredClone(trajectoriesJson);
     invalid.episodes[0].rightPositionsXyz.pop();
     expect(() => decodeTrajectories(invalid)).toThrow(/arrays are inconsistent/);
+  });
+
+  it("maps trajectory samples into the bounded video interval", () => {
+    const episode = decodeTrajectories(trajectoriesJson).episodes[0];
+    const source = {
+      cameraId: "top",
+      filename: "media/top.mp4",
+      mimeType: "video/mp4" as const,
+      fromTimestampSeconds: 4,
+      toTimestampSeconds: 4.5,
+      byteSize: 1,
+      sha256: "a".repeat(64),
+    };
+
+    expect(episodeVideoTime(episode, source, 0)).toBe(4);
+    expect(episodeVideoTime(episode, source, 5)).toBeCloseTo(
+      4 + episode.timestampsSeconds[5] - episode.timestampsSeconds[0],
+    );
+    expect(episodeVideoTime(episode, source, Number.MAX_SAFE_INTEGER)).toBe(4.5);
+  });
+
+  it("corrects video drift only when immediate or beyond the threshold", () => {
+    expect(VIDEO_DRIFT_THRESHOLD_SECONDS).toBe(0.1);
+    expect(shouldSeekEpisodeVideo(1, 1.05, false)).toBe(false);
+    expect(shouldSeekEpisodeVideo(1, 1.11, false)).toBe(true);
+    expect(shouldSeekEpisodeVideo(1, 1.01, true)).toBe(true);
   });
 });
