@@ -164,6 +164,7 @@ describe("accessible product content", () => {
 
   it("labels viewer controls and preserves the spacing disclosure", () => {
     render(<AtlasViewer />);
+    expect(screen.getByText("schema v1.0")).toBeVisible();
     expect(
       screen.getByRole("complementary", {
         name: "Viewer controls and metadata",
@@ -252,6 +253,7 @@ describe("accessible product content", () => {
     activeManifest = manifestWithVideos;
     render(<AtlasViewer />);
 
+    expect(screen.getByText("schema v1.1")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
     const video = await screen.findByLabelText(
       "Top camera synchronized episode video",

@@ -329,7 +329,9 @@ export function AtlasViewer() {
       <aside className="viewer-panel" aria-label="Viewer controls and metadata">
         <div className="panel-heading">
           <div><p className="eyebrow">Demo / episodes 0–9</p><h1>Workspace coverage</h1></div>
-          <span className="schema-chip">schema v1.0</span>
+          <span className="schema-chip">
+            schema v{manifest.schema.major}.{manifest.schema.minor}
+          </span>
         </div>
 
         <section className="control-section" aria-labelledby="metric-heading">
