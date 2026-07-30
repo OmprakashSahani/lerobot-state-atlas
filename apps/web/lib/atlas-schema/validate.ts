@@ -2,6 +2,10 @@ import type {
   AtlasManifest,
   CoverageArm,
   CoveragePayload,
+  EpisodeVideoCamera,
+  EpisodeVideoEpisode,
+  EpisodeVideoPayload,
+  EpisodeVideoSource,
   SchemaVersion,
   TrajectoryEpisode,
   TrajectoryPayload,
@@ -48,6 +52,24 @@ function stringValue(value: unknown, label: string): string {
   return value;
 }
 
+function exactFields(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+  label: string,
+): void {
+  const expected = new Set(fields);
+  const missing = fields.filter((field) => !(field in value));
+  const unsupported = Object.keys(value).filter((field) => !expected.has(field));
+  if (missing.length > 0) {
+    throw new AtlasDataError(`${label} is missing fields: ${missing.join(", ")}.`);
+  }
+  if (unsupported.length > 0) {
+    throw new AtlasDataError(
+      `${label} has unsupported fields: ${unsupported.join(", ")}.`,
+    );
+  }
+}
+
 function vector3(value: unknown, label: string): Vector3 {
   if (!Array.isArray(value) || value.length !== 3) {
     throw new AtlasDataError(`${label} must contain three numbers.`);
@@ -90,13 +112,17 @@ export function decodeManifest(value: unknown): AtlasManifest {
     "Canonical transforms",
   );
 
-  schema(candidate.schema, "Manifest");
+  const decodedManifestSchema = schema(candidate.schema, "Manifest");
   if (!Array.isArray(candidate.payloads)) {
     throw new AtlasDataError("Manifest payloads must be an array.");
   }
   const payloads = candidate.payloads.map((rawPayload, index) => {
     const payload = object(rawPayload, `Payload ${index}`);
-    if (payload.kind !== "coverage" && payload.kind !== "trajectories") {
+    if (
+      payload.kind !== "coverage" &&
+      payload.kind !== "trajectories" &&
+      payload.kind !== "episode-videos"
+    ) {
       throw new AtlasDataError(`Payload ${index} has an unsupported kind.`);
     }
     if (payload.encoding !== "json") {
@@ -113,6 +139,14 @@ export function decodeManifest(value: unknown): AtlasManifest {
   });
   if (!payloads.some((payload) => payload.kind === "coverage")) {
     throw new AtlasDataError("Manifest does not reference coverage data.");
+  }
+  if (
+    decodedManifestSchema.minor < 1 &&
+    payloads.some((payload) => payload.kind === "episode-videos")
+  ) {
+    throw new AtlasDataError(
+      "Episode-video payloads require browser-data schema v1.1 or newer.",
+    );
   }
   if (!Array.isArray(dataset.episodeIds)) {
     throw new AtlasDataError("Dataset episode IDs must be an array.");
@@ -355,4 +389,251 @@ export function decodeTrajectories(value: unknown): TrajectoryPayload {
     } satisfies TrajectoryEpisode;
   });
   return { schema: decodedSchema, episodes };
+}
+
+function episodeVideoFilename(value: unknown, label: string): string {
+  const filename = stringValue(value, label);
+  const parts = filename.split("/");
+  if (
+    filename.includes("\\") ||
+    /[:?#%]/.test(filename) ||
+    filename.startsWith("/") ||
+    parts.some((part) => part === "" || part === "." || part === "..") ||
+    !filename.toLowerCase().endsWith(".mp4")
+  ) {
+    throw new AtlasDataError(
+      `${label} must be a safe bundle-relative MP4 path.`,
+    );
+  }
+  return filename;
+}
+
+export function decodeEpisodeVideos(value: unknown): EpisodeVideoPayload {
+  const candidate = object(value, "Episode-video payload");
+  exactFields(
+    candidate,
+    ["schema", "defaultCameraId", "cameras", "episodes"],
+    "Episode-video payload",
+  );
+  const decodedSchema = schema(candidate.schema, "Episode-video payload");
+  if (decodedSchema.minor < 1) {
+    throw new AtlasDataError(
+      "Episode-video payload requires browser-data schema v1.1 or newer.",
+    );
+  }
+
+  if (!Array.isArray(candidate.cameras) || candidate.cameras.length === 0) {
+    throw new AtlasDataError("Episode-video payload must contain cameras.");
+  }
+
+  const cameraIds = new Set<string>();
+  let previousCameraId: string | undefined;
+  const cameras = candidate.cameras.map((rawCamera, index) => {
+    const camera = object(rawCamera, `Episode-video camera ${index}`);
+    exactFields(
+      camera,
+      ["cameraId", "datasetFeature", "label", "width", "height"],
+      `Episode-video camera ${index}`,
+    );
+    const cameraId = stringValue(
+      camera.cameraId,
+      `Episode-video camera ${index} ID`,
+    );
+    if (cameraIds.has(cameraId)) {
+      throw new AtlasDataError("Episode-video camera IDs must be unique.");
+    }
+    if (previousCameraId !== undefined && cameraId < previousCameraId) {
+      throw new AtlasDataError(
+        "Episode-video cameras must be ordered by camera ID.",
+      );
+    }
+    cameraIds.add(cameraId);
+    previousCameraId = cameraId;
+    return {
+      cameraId,
+      datasetFeature: stringValue(
+        camera.datasetFeature,
+        `Episode-video camera ${cameraId} dataset feature`,
+      ),
+      label: stringValue(
+        camera.label,
+        `Episode-video camera ${cameraId} label`,
+      ),
+      width: integer(
+        camera.width,
+        `Episode-video camera ${cameraId} width`,
+        1,
+      ),
+      height: integer(
+        camera.height,
+        `Episode-video camera ${cameraId} height`,
+        1,
+      ),
+    } satisfies EpisodeVideoCamera;
+  });
+
+  const defaultCameraId = stringValue(
+    candidate.defaultCameraId,
+    "Episode-video default camera ID",
+  );
+  if (!cameraIds.has(defaultCameraId)) {
+    throw new AtlasDataError(
+      "Episode-video default camera must identify a declared camera.",
+    );
+  }
+
+  if (!Array.isArray(candidate.episodes) || candidate.episodes.length === 0) {
+    throw new AtlasDataError("Episode-video payload must contain episodes.");
+  }
+
+  const episodeIds = new Set<number>();
+  const filenames = new Set<string>();
+  let previousEpisodeId: number | undefined;
+  const episodes = candidate.episodes.map((rawEpisode, episodeIndex) => {
+    const episode = object(
+      rawEpisode,
+      `Episode-video episode ${episodeIndex}`,
+    );
+    exactFields(
+      episode,
+      ["episodeId", "videos"],
+      `Episode-video episode ${episodeIndex}`,
+    );
+    const episodeId = integer(
+      episode.episodeId,
+      `Episode-video episode ${episodeIndex} ID`,
+    );
+    if (episodeIds.has(episodeId)) {
+      throw new AtlasDataError("Episode-video episode IDs must be unique.");
+    }
+    if (previousEpisodeId !== undefined && episodeId < previousEpisodeId) {
+      throw new AtlasDataError(
+        "Episode-video episodes must be ordered by episode ID.",
+      );
+    }
+    episodeIds.add(episodeId);
+    previousEpisodeId = episodeId;
+
+    if (!Array.isArray(episode.videos) || episode.videos.length === 0) {
+      throw new AtlasDataError(
+        `Episode-video episode ${episodeId} must contain videos.`,
+      );
+    }
+
+    const sourceCameraIds = new Set<string>();
+    let previousSourceCameraId: string | undefined;
+    const videos = episode.videos.map((rawSource, sourceIndex) => {
+      const source = object(
+        rawSource,
+        `Episode-video episode ${episodeId} source ${sourceIndex}`,
+      );
+      exactFields(
+        source,
+        [
+          "cameraId",
+          "filename",
+          "mimeType",
+          "fromTimestampSeconds",
+          "toTimestampSeconds",
+          "byteSize",
+          "sha256",
+        ],
+        `Episode-video episode ${episodeId} source ${sourceIndex}`,
+      );
+      const cameraId = stringValue(
+        source.cameraId,
+        `Episode-video episode ${episodeId} source camera ID`,
+      );
+      if (!cameraIds.has(cameraId)) {
+        throw new AtlasDataError(
+          `Episode-video episode ${episodeId} references an undeclared camera.`,
+        );
+      }
+      if (sourceCameraIds.has(cameraId)) {
+        throw new AtlasDataError(
+          `Episode-video episode ${episodeId} camera IDs must be unique.`,
+        );
+      }
+      if (
+        previousSourceCameraId !== undefined &&
+        cameraId < previousSourceCameraId
+      ) {
+        throw new AtlasDataError(
+          `Episode-video episode ${episodeId} videos must be ordered by camera ID.`,
+        );
+      }
+      sourceCameraIds.add(cameraId);
+      previousSourceCameraId = cameraId;
+
+      const filename = episodeVideoFilename(
+        source.filename,
+        `Episode-video episode ${episodeId} filename`,
+      );
+      if (filenames.has(filename)) {
+        throw new AtlasDataError(
+          "Episode-video media filenames must be globally unique.",
+        );
+      }
+      filenames.add(filename);
+
+      if (source.mimeType !== "video/mp4") {
+        throw new AtlasDataError(
+          `Episode-video episode ${episodeId} MIME type must be video/mp4.`,
+        );
+      }
+
+      const fromTimestampSeconds = numberValue(
+        source.fromTimestampSeconds,
+        `Episode-video episode ${episodeId} start timestamp`,
+      );
+      const toTimestampSeconds = numberValue(
+        source.toTimestampSeconds,
+        `Episode-video episode ${episodeId} end timestamp`,
+      );
+      if (toTimestampSeconds <= fromTimestampSeconds) {
+        throw new AtlasDataError(
+          `Episode-video episode ${episodeId} timestamps are invalid.`,
+        );
+      }
+
+      const sha256 = stringValue(
+        source.sha256,
+        `Episode-video episode ${episodeId} checksum`,
+      );
+      if (!/^[0-9a-f]{64}$/.test(sha256)) {
+        throw new AtlasDataError(
+          `Episode-video episode ${episodeId} checksum must be lowercase SHA-256.`,
+        );
+      }
+
+      return {
+        cameraId,
+        filename,
+        mimeType: source.mimeType,
+        fromTimestampSeconds,
+        toTimestampSeconds,
+        byteSize: integer(
+          source.byteSize,
+          `Episode-video episode ${episodeId} byte size`,
+          1,
+        ),
+        sha256,
+      } satisfies EpisodeVideoSource;
+    });
+
+    if (!sourceCameraIds.has(defaultCameraId)) {
+      throw new AtlasDataError(
+        `Episode-video episode ${episodeId} must include the default camera.`,
+      );
+    }
+
+    return { episodeId, videos } satisfies EpisodeVideoEpisode;
+  });
+
+  return {
+    schema: decodedSchema,
+    defaultCameraId,
+    cameras,
+    episodes,
+  };
 }

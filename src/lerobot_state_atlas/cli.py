@@ -1,5 +1,6 @@
+import json
 from math import isfinite
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import typer
 from rich.console import Console
@@ -579,6 +580,67 @@ def aggregate_workspace(
     )
 
 
+def _episode_video_inputs(
+    metadata_path: Path | None,
+    media_root: Path | None,
+) -> tuple[dict | None, dict[str, Path] | None]:
+    if (metadata_path is None) != (media_root is None):
+        raise ValueError(
+            "--episode-video-metadata and --episode-video-media-root "
+            "must be provided together."
+        )
+
+    if metadata_path is None or media_root is None:
+        return None, None
+
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("Episode-video metadata must be valid JSON.") from error
+
+    if not isinstance(payload, dict):
+        raise ValueError("Episode-video metadata must be a JSON object.")
+
+    try:
+        sources = [
+            source for episode in payload["episodes"] for source in episode["videos"]
+        ]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            "Episode-video metadata must contain episode video sources."
+        ) from error
+
+    media: dict[str, Path] = {}
+    for source in sources:
+        if not isinstance(source, dict) or not isinstance(
+            source.get("filename"),
+            str,
+        ):
+            raise ValueError("Each episode-video source must contain a filename.")
+
+        filename = source["filename"]
+        relative = PurePosixPath(filename)
+        if (
+            "\\" in filename
+            or "://" in filename
+            or filename.startswith("//")
+            or relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.as_posix() != filename
+        ):
+            raise ValueError(
+                "Episode-video filenames must be safe bundle-relative POSIX paths."
+            )
+
+        if filename in media:
+            raise ValueError("Episode-video media filenames must be unique.")
+
+        media[filename] = media_root.joinpath(*relative.parts)
+
+    return payload, media
+
+
 @app.command("export-browser-data")
 def export_browser_data_command(
     repo_id: str = typer.Argument(
@@ -628,6 +690,32 @@ def export_browser_data_command(
         "--trajectory-episode",
         help="Episode to include in the optional trajectory payload. Repeatable.",
     ),
+    episode_video_metadata_path: Path | None = typer.Option(
+        None,
+        "--episode-video-metadata",
+        help=(
+            "Optional v1.1 episode-video metadata JSON. Requires "
+            "--episode-video-media-root."
+        ),
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    episode_video_media_root: Path | None = typer.Option(
+        None,
+        "--episode-video-media-root",
+        help=(
+            "Directory containing MP4 paths declared by the optional "
+            "episode-video metadata."
+        ),
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+    ),
     episode_batch_size: int = typer.Option(
         32,
         "--episode-batch-size",
@@ -674,6 +762,11 @@ def export_browser_data_command(
         if len(set(trajectory_episode)) != len(trajectory_episode):
             raise ValueError("Trajectory episode indices must be unique.")
 
+        episode_video_payload, episode_video_media = _episode_video_inputs(
+            episode_video_metadata_path,
+            episode_video_media_root,
+        )
+
         upstream_identity = urdf_upstream_identity_path.read_text(
             encoding="utf-8"
         ).strip()
@@ -693,6 +786,8 @@ def export_browser_data_command(
             urdf_upstream_identity=upstream_identity,
             repository_path=Path.cwd(),
             dataset_revision=dataset_revision,
+            episode_video_payload=episode_video_payload,
+            episode_video_media=episode_video_media,
         )
     except Exception as error:
         console.print(f"[red]Failed to export browser data:[/red] {error}")

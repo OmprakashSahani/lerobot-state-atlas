@@ -9,28 +9,101 @@ import MethodologyPage from "@/app/methodology/page";
 import { AtlasViewer } from "@/components/viewer/AtlasViewer";
 import {
   decodeCoverage,
+  decodeEpisodeVideos,
   decodeManifest,
   decodeTrajectories,
 } from "@/lib/atlas-schema/validate";
+import {
+  loadEpisodeVideos,
+  loadTrajectories,
+} from "@/lib/data/loadBundle";
 import { prepareCoverage } from "@/lib/data/prepareCoverage";
 
 const manifest = decodeManifest(manifestJson);
+const manifestWithVideos = decodeManifest({
+  ...manifestJson,
+  schema: { ...manifestJson.schema, minor: 1 },
+  payloads: [
+    ...manifestJson.payloads,
+    {
+      kind: "episode-videos",
+      filename: "episode-videos.json",
+      required: false,
+      encoding: "json",
+      byteSize: 1234,
+      sha256: "b".repeat(64),
+    },
+  ],
+});
+const episodeVideos = decodeEpisodeVideos({
+  schema: {
+    name: "lerobot-state-atlas.browser-data",
+    major: 1,
+    minor: 1,
+  },
+  defaultCameraId: "top",
+  cameras: [
+    {
+      cameraId: "left",
+      datasetFeature: "observation.images.left_wrist",
+      label: "Left wrist camera",
+      width: 224,
+      height: 224,
+    },
+    {
+      cameraId: "top",
+      datasetFeature: "observation.images.top",
+      label: "Top camera",
+      width: 224,
+      height: 224,
+    },
+  ],
+  episodes: [0, 1].map((episodeId) => ({
+    episodeId,
+    videos: [
+      {
+        cameraId: "left",
+        filename: `media/episode-${episodeId}/left.mp4`,
+        mimeType: "video/mp4",
+        fromTimestampSeconds: 0,
+        toTimestampSeconds: 20,
+        byteSize: 100,
+        sha256: `${episodeId + 1}`.repeat(64),
+      },
+      {
+        cameraId: "top",
+        filename: `media/episode-${episodeId}/top.mp4`,
+        mimeType: "video/mp4",
+        fromTimestampSeconds: 0,
+        toTimestampSeconds: 20,
+        byteSize: 100,
+        sha256: `${episodeId + 3}`.repeat(64),
+      },
+    ],
+  })),
+});
 const coverage = decodeCoverage(coverageJson);
 const preparedArmsForTest = prepareCoverage(manifest, coverage);
 const setSpacingMock = vi.fn();
+let activeManifest = manifest;
 
 afterEach(() => {
   cleanup();
   setSpacingMock.mockClear();
+  activeManifest = manifest;
+  vi.mocked(loadTrajectories).mockResolvedValue(
+    decodeTrajectories(trajectoriesJson),
+  );
+  vi.mocked(loadEpisodeVideos).mockResolvedValue(episodeVideos);
 });
 
 vi.mock("@/components/viewer/AtlasDataProvider", () => ({
   useAtlasData: () => ({
     status: "ready",
     data: {
-      manifest,
+      manifest: activeManifest,
       coverage,
-      preparedArms: prepareCoverage(manifest, coverage),
+      preparedArms: prepareCoverage(activeManifest, coverage),
     },
   }),
 }));
@@ -67,6 +140,8 @@ vi.mock("@/components/viewer/ViewerCanvas", () => ({
 }));
 
 vi.mock("@/lib/data/loadBundle", () => ({
+  episodeVideoAssetUrl: (filename: string) => `/atlas-data/demo-v1/${filename}`,
+  loadEpisodeVideos: vi.fn(async () => episodeVideos),
   loadTrajectories: vi.fn(async () => decodeTrajectories(trajectoriesJson)),
 }));
 
@@ -102,6 +177,11 @@ describe("accessible product content", () => {
       screen.getByRole("button", { name: "Clear selection" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Load playback" })).toBeVisible();
+    expect(
+      screen.getByText(
+        "Synchronized episode video is not included in this bundle.",
+      ),
+    ).toBeVisible();
     expect(screen.getByLabelText("Auto rotate")).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Robot setup" }),
@@ -166,5 +246,57 @@ describe("accessible product content", () => {
     expect(screen.getByLabelText("Timeline")).toBeVisible();
     expect(screen.getByLabelText("Playback speed")).toBeVisible();
     expect(screen.getByLabelText("Loop playback")).toBeVisible();
+  });
+
+  it("exposes synchronized video and switches camera and episode sources", async () => {
+    activeManifest = manifestWithVideos;
+    render(<AtlasViewer />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+    const video = await screen.findByLabelText(
+      "Top camera synchronized episode video",
+    );
+    expect(video).toHaveAttribute(
+      "src",
+      "/atlas-data/demo-v1/media/episode-0/top.mp4",
+    );
+    expect(video).not.toHaveAttribute("controls");
+    expect(video).toHaveAttribute("playsinline");
+    expect(video).toHaveAttribute("preload", "metadata");
+
+    fireEvent.change(screen.getByLabelText("Camera"), {
+      target: { value: "left" },
+    });
+    expect(
+      screen.getByLabelText("Left wrist camera synchronized episode video"),
+    ).toHaveAttribute(
+      "src",
+      "/atlas-data/demo-v1/media/episode-0/left.mp4",
+    );
+
+    fireEvent.change(screen.getByLabelText("Episode"), {
+      target: { value: "1" },
+    });
+    expect(
+      screen.getByLabelText("Left wrist camera synchronized episode video"),
+    ).toHaveAttribute(
+      "src",
+      "/atlas-data/demo-v1/media/episode-1/left.mp4",
+    );
+  });
+
+  it("keeps trajectory controls when optional video metadata fails", async () => {
+    activeManifest = manifestWithVideos;
+    vi.mocked(loadEpisodeVideos).mockRejectedValueOnce(
+      new Error("Invalid video metadata."),
+    );
+    render(<AtlasViewer />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+    expect(await screen.findByLabelText("Timeline")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Play" })).toBeVisible();
+    expect(
+      await screen.findByText(/Synchronized episode video is unavailable/),
+    ).toBeVisible();
   });
 });

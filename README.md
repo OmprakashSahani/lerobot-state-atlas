@@ -227,9 +227,10 @@ Check the Git diff for whitespace errors:
 
 ## Browser-data export
 
-The web application reads deterministic browser-data schema v1.0 bundles. It
-does not run LeRobot, PyTorch, URDF parsing, or forward kinematics at request
-time.
+The web application reads deterministic browser-data schema v1 bundles.
+Schema v1.1 adds optional synchronized episode-video metadata while remaining
+compatible with existing v1.0 bundles. The application does not run LeRobot,
+PyTorch, URDF parsing, or forward kinematics at request time.
 
 ### Browser viewer features
 
@@ -237,6 +238,11 @@ The statically deployed Next.js viewer keeps the schema v1 bundle immutable and
 loads only `manifest.json` followed by `coverage.json` on its initial path.
 Opening trajectory playback lazily requests the optional `trajectories.json`;
 missing or invalid optional trajectory data is reported without hiding coverage.
+When a v1.1 manifest also references `episode-videos.json`, its metadata is
+loaded only after trajectories load successfully. Referenced MP4 assets remain
+ordinary bundle-relative static files and are requested by the video element
+only for the active episode and camera. Missing or invalid optional video data
+does not hide the 3D scene or trajectory controls.
 
 Coverage can be coloured by three exact arm-specific metrics:
 
@@ -263,6 +269,12 @@ and advances from elapsed wall-clock time with selectable speed rather than
 advancing one dataset frame per browser render. Episode changes restart safely;
 the timeline supports immediate scrubbing, restart, and optional looping while
 coverage remains visible.
+
+Optional episode video follows that same playback state; it does not introduce
+a second timeline or native media controls. The current atlas sample timestamp
+is mapped relative to the trajectory episode start and into the selected
+camera's declared media interval. Play, pause, speed, episode changes, restart,
+scrubbing, and loop state remain controlled by the atlas playback controls.
 
 The viewer also supports OrbitControls-based automatic rotation and manual
 orbit, pan, zoom, and camera reset. Runtime arm spacing is a display and query
@@ -294,6 +306,18 @@ Generate the pinned demo bundle:
       --bundle-id demo-v1 \
       --output apps/web/public/atlas-data/demo-v1
 
+To package synchronized MP4 media into a new schema v1.1 bundle, also provide
+both of these options:
+
+    --episode-video-metadata /path/to/episode-videos.json \
+    --episode-video-media-root /path/to/media-root
+
+The options are paired: neither may be supplied alone. Every bundle-relative
+media filename declared by the metadata is resolved beneath
+`--episode-video-media-root`; for example, a declared
+`media/episode-000000/top.mp4` resolves to
+`/path/to/media-root/media/episode-000000/top.mp4`.
+
 Validate any bundle and its payload checksums:
 
     uv run lerobot-state-atlas validate-browser-data \
@@ -306,13 +330,15 @@ resolved commit separately, along with the dataset metadata codebase version
 and installed LeRobot package version.
 
 The exporter writes deterministic JSON into a temporary sibling directory,
-validates the complete bundle, and atomically installs it. Coverage and
-trajectory payloads are deterministic for identical pinned dataset, URDF,
-parameters, and exporter source. No timestamp is stored. Manifest provenance
-records the repository HEAD separately from a dirty-working-tree flag, so an
-uncommitted exporter is never represented as fully identified by HEAD alone.
-The dirty check includes modified, staged, and non-ignored untracked files;
-ignored output such as `node_modules` and `.next` is excluded.
+copies declared MP4 files there, validates the complete bundle, and atomically
+installs it. Coverage, trajectory, and episode-video metadata payloads are
+deterministic for identical pinned inputs. Validation checks every packaged
+MP4 against its declared positive byte size and SHA-256 checksum. No timestamp
+is stored. Manifest provenance records the repository HEAD separately from a
+dirty-working-tree flag, so an uncommitted exporter is never represented as
+fully identified by HEAD alone. The dirty check includes modified, staged, and
+non-ignored untracked files; ignored output such as `node_modules` and `.next`
+is excluded.
 
 The included demo uses episodes 0 through 9 for coverage and episodes 0 and 1
 for the optional, currently unloaded trajectory payload. Its files are:
@@ -323,7 +349,11 @@ for the optional, currently unloaded trajectory payload. Its files are:
 - total: 168,138 bytes uncompressed; 66,412 bytes gzip-compressed
 
 Compressed sizes use gzip level 9 and may vary slightly with the deployment
-CDN. The viewer loads only the manifest and coverage payload.
+CDN. The viewer loads only the manifest and coverage payload initially. The
+current public `demo-v1` bundle does not contain episode-video metadata or
+dataset MP4 files. Private or gated dataset media must not be published without
+permission; access tokens and gated remote URLs must never be embedded in a
+browser bundle.
 
 ## Web application
 
@@ -351,11 +381,11 @@ headers from `next.config.ts`.
 
 Production atlas bundle directories are immutable. Once a path such as
 `/atlas-data/demo-v1/` has been deployed, its files must never be replaced or
-mutated. Any manifest, schema, provenance, coverage, or trajectory change must
-be published under a new bundle/version directory and referenced by the
-application through that new URL. Development responses use `no-store` so
-local schema and bundle iteration cannot reuse an older immutable browser
-response.
+mutated. Any manifest, schema, provenance, coverage, trajectory, episode-video
+metadata, or media change must be published under a new bundle/version
+directory and referenced by the application through that new URL. Development
+responses use `no-store` so local schema and bundle iteration cannot reuse an
+older immutable browser response.
 
 ## Current validation status
 

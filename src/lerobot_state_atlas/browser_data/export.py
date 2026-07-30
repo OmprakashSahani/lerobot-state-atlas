@@ -3,8 +3,9 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import importlib.metadata
+import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ from lerobot_state_atlas.aggregation import aggregate_workspace_coverages
 from lerobot_state_atlas.browser_data.models import BrowserDataExport
 from lerobot_state_atlas.browser_data.schema import (
     COVERAGE_FILENAME,
+    EPISODE_VIDEO_FILENAME,
     MANIFEST_FILENAME,
     SCHEMA_MAJOR,
     SCHEMA_MINOR,
@@ -259,7 +261,8 @@ def build_browser_data_documents(
     coverages: Sequence[Any],
     source_provenance: SourceProvenance,
     trajectory_payload: Mapping[str, Any] | None = None,
-) -> tuple[dict[str, Any], bytes, bytes | None]:
+    episode_video_payload: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], bytes, bytes | None, bytes | None]:
     """Build deterministic validated document bytes from computed domain models."""
     normalized_episodes = sorted(set(int(value) for value in selected_episodes))
     if not bundle_id:
@@ -275,6 +278,11 @@ def build_browser_data_documents(
         None
         if trajectory_payload is None
         else deterministic_json_bytes(trajectory_payload)
+    )
+    episode_video_bytes = (
+        None
+        if episode_video_payload is None
+        else deterministic_json_bytes(episode_video_payload)
     )
 
     tool_point_visits = sum(sum(arm["visitCounts"]) for arm in coverage["arms"])
@@ -300,6 +308,15 @@ def build_browser_data_documents(
                 content=trajectory_bytes,
             )
         )
+    if episode_video_bytes is not None:
+        payloads.append(
+            _payload_reference(
+                kind="episode-videos",
+                filename=EPISODE_VIDEO_FILENAME,
+                required=False,
+                content=episode_video_bytes,
+            )
+        )
 
     manifest = {
         "schema": _schema_reference(),
@@ -319,7 +336,8 @@ def build_browser_data_documents(
                 "repository source state."
             ),
             "determinism": (
-                "Coverage and trajectory payloads are deterministic for identical "
+                "Coverage, trajectory, and episode-video metadata payloads are "
+                "deterministic for identical "
                 "pinned dataset, URDF, parameters, and exporter source. Manifest "
                 "provenance may reflect repository state. No generation timestamp "
                 "is stored."
@@ -382,7 +400,44 @@ def build_browser_data_documents(
         "sceneBounds": _scene_bounds(coverage, voxel_size),
         "payloads": payloads,
     }
-    return manifest, coverage_bytes, trajectory_bytes
+    return (
+        manifest,
+        coverage_bytes,
+        trajectory_bytes,
+        episode_video_bytes,
+    )
+
+
+def _episode_video_media_filenames(content: bytes) -> tuple[str, ...]:
+    try:
+        payload = json.loads(content)
+        return tuple(
+            str(source["filename"])
+            for episode in payload["episodes"]
+            for source in episode["videos"]
+        )
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "Episode-video payload does not contain valid media references."
+        ) from error
+
+
+def _bundle_media_target(root: Path, filename: str) -> Path:
+    relative = PurePosixPath(filename)
+    if (
+        "\\" in filename
+        or "://" in filename
+        or filename.startswith("//")
+        or re.match(r"^[A-Za-z]:", filename)
+        or relative.is_absolute()
+        or not relative.parts
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or relative.as_posix() != filename
+    ):
+        raise ValueError(
+            "Episode-video media filenames must be safe bundle-relative POSIX paths."
+        )
+    return root.joinpath(*relative.parts)
 
 
 def _write_bundle(
@@ -390,6 +445,8 @@ def _write_bundle(
     manifest: Mapping[str, Any],
     coverage_bytes: bytes,
     trajectory_bytes: bytes | None,
+    episode_video_bytes: bytes | None = None,
+    episode_video_media: Mapping[str, str | Path] | None = None,
 ) -> BrowserDataExport:
     destination = destination.resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -405,6 +462,33 @@ def _write_bundle(
         (temporary_path / COVERAGE_FILENAME).write_bytes(coverage_bytes)
         if trajectory_bytes is not None:
             (temporary_path / TRAJECTORY_FILENAME).write_bytes(trajectory_bytes)
+
+        media_sources = dict(episode_video_media or {})
+        if episode_video_bytes is None:
+            if media_sources:
+                raise ValueError(
+                    "Episode-video media was provided without a metadata payload."
+                )
+        else:
+            (temporary_path / EPISODE_VIDEO_FILENAME).write_bytes(episode_video_bytes)
+            declared_media = _episode_video_media_filenames(episode_video_bytes)
+            if len(declared_media) != len(set(declared_media)):
+                raise ValueError("Episode-video media filenames must be unique.")
+            if set(media_sources) != set(declared_media):
+                raise ValueError(
+                    "Episode-video media files must exactly match the metadata payload."
+                )
+
+            for filename in sorted(declared_media):
+                source = Path(media_sources[filename]).resolve()
+                if not source.is_file():
+                    raise ValueError(
+                        f"Episode-video source file does not exist: {source}."
+                    )
+                target = _bundle_media_target(temporary_path, filename)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+
         (temporary_path / MANIFEST_FILENAME).write_bytes(
             deterministic_json_bytes(manifest)
         )
@@ -459,6 +543,8 @@ def export_browser_data(
     urdf_upstream_identity: str,
     repository_path: str | Path,
     dataset_revision: str | None = None,
+    episode_video_payload: Mapping[str, Any] | None = None,
+    episode_video_media: Mapping[str, str | Path] | None = None,
 ) -> BrowserDataExport:
     """Generate, validate, and atomically install a browser-data bundle."""
     normalized_episodes = tuple(episodes)
@@ -525,7 +611,12 @@ def export_browser_data(
             selected_episodes=normalized_trajectory_episodes,
         )
 
-    manifest, coverage_bytes, trajectory_bytes = build_browser_data_documents(
+    (
+        manifest,
+        coverage_bytes,
+        trajectory_bytes,
+        episode_video_bytes,
+    ) = build_browser_data_documents(
         bundle_id=bundle_id,
         summary=summary,
         selected_episodes=normalized_episodes,
@@ -537,10 +628,13 @@ def export_browser_data(
         coverages=aggregation.coverages,
         source_provenance=_git_source_provenance(Path(repository_path)),
         trajectory_payload=trajectory_document,
+        episode_video_payload=episode_video_payload,
     )
     return _write_bundle(
         Path(output_path),
         manifest,
         coverage_bytes,
         trajectory_bytes,
+        episode_video_bytes,
+        episode_video_media,
     )

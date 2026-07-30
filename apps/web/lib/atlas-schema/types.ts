@@ -12,7 +12,7 @@ export interface RigidTransform {
 }
 
 export interface PayloadReference {
-  kind: "coverage" | "trajectories";
+  kind: "coverage" | "trajectories" | "episode-videos";
   filename: string;
   required: boolean;
   encoding: "json";
@@ -112,6 +112,36 @@ export interface TrajectoryEpisode {
 export interface TrajectoryPayload {
   schema: SchemaVersion;
   episodes: TrajectoryEpisode[];
+}
+
+export interface EpisodeVideoCamera {
+  cameraId: string;
+  datasetFeature: string;
+  label: string;
+  width: number;
+  height: number;
+}
+
+export interface EpisodeVideoSource {
+  cameraId: string;
+  filename: string;
+  mimeType: "video/mp4";
+  fromTimestampSeconds: number;
+  toTimestampSeconds: number;
+  byteSize: number;
+  sha256: string;
+}
+
+export interface EpisodeVideoEpisode {
+  episodeId: number;
+  videos: EpisodeVideoSource[];
+}
+
+export interface EpisodeVideoPayload {
+  schema: SchemaVersion;
+  defaultCameraId: string;
+  cameras: EpisodeVideoCamera[];
+  episodes: EpisodeVideoEpisode[];
 }
 
 export interface PreparedVoxelArm {

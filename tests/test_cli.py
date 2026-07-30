@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -88,12 +89,145 @@ def test_version() -> None:
     assert "lerobot-state-atlas 0.1.0" in plain_output(result)
 
 
-def test_export_browser_data_help_includes_dataset_revision() -> None:
+def test_export_browser_data_help_includes_optional_inputs() -> None:
     result = runner.invoke(app, ["export-browser-data", "--help"])
-    output = compact_output(plain_output(result))
+    assert result.exit_code == 0
+
+    from typer.main import get_command
+
+    root_command = get_command(app)
+    export_command = root_command.commands["export-browser-data"]
+    option_names = {
+        option
+        for parameter in export_command.params
+        for option in getattr(parameter, "opts", ())
+    }
+
+    assert "--dataset-revision" in option_names
+    assert "--episode-video-metadata" in option_names
+    assert "--episode-video-media-root" in option_names
+
+
+def test_export_browser_data_forwards_episode_video_inputs(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text("<robot name='test'/>", encoding="utf-8")
+
+    identity_path = tmp_path / "UPSTREAM_COMMIT"
+    identity_path.write_text("upstream-commit\n", encoding="utf-8")
+
+    media_root = tmp_path / "video-inputs"
+    media_path = media_root / "media/episode-000000/top.mp4"
+    media_path.parent.mkdir(parents=True)
+    media_path.write_bytes(b"test-video")
+
+    payload = {
+        "schema": {
+            "name": "lerobot-state-atlas.browser-data",
+            "major": 1,
+            "minor": 1,
+        },
+        "defaultCameraId": "top",
+        "cameras": [],
+        "episodes": [
+            {
+                "episodeId": 0,
+                "videos": [
+                    {
+                        "filename": "media/episode-000000/top.mp4",
+                    }
+                ],
+            }
+        ],
+    }
+    metadata_path = tmp_path / "episode-videos.json"
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    calls: dict[str, object] = {}
+
+    def fake_export(repo_id: str, **kwargs):
+        calls["repo_id"] = repo_id
+        calls.update(kwargs)
+        return SimpleNamespace(
+            output_path=tmp_path / "bundle",
+            dataset_frame_count=1,
+            tool_point_visit_count=2,
+            arm_voxel_entry_count=1,
+            unique_shared_grid_cell_count=1,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.export_browser_data",
+        fake_export,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export-browser-data",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--urdf-upstream-identity",
+            str(identity_path),
+            "--episode-end",
+            "0",
+            "--trajectory-episode",
+            "0",
+            "--episode-video-metadata",
+            str(metadata_path),
+            "--episode-video-media-root",
+            str(media_root),
+            "--bundle-id",
+            "test-v1",
+            "--output",
+            str(tmp_path / "bundle"),
+        ],
+    )
 
     assert result.exit_code == 0
-    assert "--dataset-revision" in output
+    assert calls["episode_video_payload"] == payload
+    assert calls["episode_video_media"] == {
+        "media/episode-000000/top.mp4": media_path.resolve()
+    }
+
+
+def test_export_browser_data_requires_both_video_options(
+    tmp_path: Path,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text("<robot name='test'/>", encoding="utf-8")
+
+    identity_path = tmp_path / "UPSTREAM_COMMIT"
+    identity_path.write_text("upstream-commit\n", encoding="utf-8")
+
+    metadata_path = tmp_path / "episode-videos.json"
+    metadata_path.write_text('{"episodes": []}', encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "export-browser-data",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--urdf-upstream-identity",
+            str(identity_path),
+            "--episode-end",
+            "0",
+            "--episode-video-metadata",
+            str(metadata_path),
+            "--bundle-id",
+            "test-v1",
+            "--output",
+            str(tmp_path / "bundle"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "must be provided together" in plain_output(result)
 
 
 def test_inspect_command(monkeypatch) -> None:

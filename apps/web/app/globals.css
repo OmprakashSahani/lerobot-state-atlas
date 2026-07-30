@@ -510,6 +510,13 @@ a {
   min-height: 580px;
 }
 
+.viewer-visuals {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr);
+  min-height: 0;
+  min-width: 0;
+}
+
 .viewer-stage {
   background: #06101a;
   min-width: 0;
@@ -553,6 +560,71 @@ a {
 .scene-help {
   bottom: 1rem;
   left: 1rem;
+}
+
+.episode-video-panel {
+  background: #081722;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 1rem;
+}
+
+.episode-video-heading {
+  align-items: flex-end;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+
+.episode-video-heading .eyebrow {
+  font-size: 0.55rem;
+  margin-bottom: 0.35rem;
+}
+
+.episode-video-heading h2 {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.episode-video-heading label {
+  color: var(--muted);
+  display: block;
+  font-size: 0.62rem;
+  margin-bottom: 0.3rem;
+}
+
+.episode-video-heading select {
+  background: #0d2230;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font: inherit;
+  max-width: 150px;
+  padding: 0.4rem;
+}
+
+.episode-video-panel video {
+  background: #03080c;
+  display: block;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  width: 100%;
+}
+
+.episode-video-message {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex: 1;
+  font-size: 0.75rem;
+  justify-content: center;
+  line-height: 1.6;
+  margin: 0;
+  padding: 1.5rem;
+  text-align: center;
 }
 
 .viewer-panel {
@@ -992,9 +1064,20 @@ a {
 
   .viewer-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(390px, 58dvh) auto;
+    grid-template-rows: auto auto;
     height: auto;
     min-height: calc(100dvh - 68px);
+  }
+
+  .viewer-visuals {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(390px, 58dvh) minmax(220px, auto);
+  }
+
+  .episode-video-panel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    min-height: 220px;
   }
 
   .viewer-panel {
@@ -1077,7 +1160,11 @@ a {
   }
 
   .viewer-shell {
-    grid-template-rows: 52dvh auto;
+    grid-template-rows: auto auto;
+  }
+
+  .viewer-visuals {
+    grid-template-rows: 52dvh minmax(210px, auto);
   }
 
   .scene-help {

@@ -1,10 +1,49 @@
-import type { TrajectoryEpisode, Vector3 } from "@/lib/atlas-schema/types";
+import type {
+  EpisodeVideoSource,
+  TrajectoryEpisode,
+  Vector3,
+} from "@/lib/atlas-schema/types";
 
 export interface PlaybackState {
   frame: number;
   playing: boolean;
   speed: number;
   loop: boolean;
+}
+
+export const VIDEO_DRIFT_THRESHOLD_SECONDS = 0.1;
+
+export function episodeVideoTime(
+  episode: TrajectoryEpisode,
+  source: EpisodeVideoSource,
+  frame: number,
+): number {
+  const index = Math.max(
+    0,
+    Math.min(episode.timestampsSeconds.length - 1, Math.floor(frame)),
+  );
+  const elapsed =
+    episode.timestampsSeconds[index] - episode.timestampsSeconds[0];
+  return Math.min(
+    source.toTimestampSeconds,
+    Math.max(
+      source.fromTimestampSeconds,
+      source.fromTimestampSeconds + elapsed,
+    ),
+  );
+}
+
+export function shouldSeekEpisodeVideo(
+  currentTime: number,
+  targetTime: number,
+  immediate: boolean,
+  thresholdSeconds = VIDEO_DRIFT_THRESHOLD_SECONDS,
+): boolean {
+  return (
+    immediate ||
+    !Number.isFinite(currentTime) ||
+    Math.abs(currentTime - targetTime) > thresholdSeconds
+  );
 }
 
 export function advancePlayback(

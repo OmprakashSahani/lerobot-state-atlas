@@ -1,12 +1,13 @@
-"""Constants and structural rules for browser-data schema version 1.0."""
+"""Constants and structural rules for browser-data schema version 1.1."""
 
 SCHEMA_NAME = "lerobot-state-atlas.browser-data"
 SCHEMA_MAJOR = 1
-SCHEMA_MINOR = 0
+SCHEMA_MINOR = 1
 
 MANIFEST_FILENAME = "manifest.json"
 COVERAGE_FILENAME = "coverage.json"
 TRAJECTORY_FILENAME = "trajectories.json"
+EPISODE_VIDEO_FILENAME = "episode-videos.json"
 
 MANIFEST_FIELDS = {
     "schema",
@@ -108,4 +109,28 @@ TRAJECTORY_EPISODE_FIELDS = {
     "timestampsSeconds",
     "leftPositionsXyz",
     "rightPositionsXyz",
+}
+
+EPISODE_VIDEO_PAYLOAD_FIELDS = {
+    "schema",
+    "defaultCameraId",
+    "cameras",
+    "episodes",
+}
+EPISODE_VIDEO_CAMERA_FIELDS = {
+    "cameraId",
+    "datasetFeature",
+    "label",
+    "width",
+    "height",
+}
+EPISODE_VIDEO_EPISODE_FIELDS = {"episodeId", "videos"}
+EPISODE_VIDEO_SOURCE_FIELDS = {
+    "cameraId",
+    "filename",
+    "mimeType",
+    "fromTimestampSeconds",
+    "toTimestampSeconds",
+    "byteSize",
+    "sha256",
 }

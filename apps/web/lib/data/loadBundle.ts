@@ -1,7 +1,13 @@
-import type { AtlasData, AtlasManifest, TrajectoryPayload } from "@/lib/atlas-schema/types";
+import type {
+  AtlasData,
+  AtlasManifest,
+  EpisodeVideoPayload,
+  TrajectoryPayload,
+} from "@/lib/atlas-schema/types";
 import {
   AtlasDataError,
   decodeCoverage,
+  decodeEpisodeVideos,
   decodeManifest,
   decodeTrajectories,
 } from "@/lib/atlas-schema/validate";
@@ -12,6 +18,10 @@ import {
 } from "@/lib/data/cachePolicy";
 
 const BUNDLE_BASE = "/atlas-data/demo-v1";
+
+export function episodeVideoAssetUrl(filename: string): string {
+  return `${BUNDLE_BASE}/${filename}`;
+}
 
 async function jsonResponse(response: Response, label: string): Promise<unknown> {
   if (!response.ok) {
@@ -42,6 +52,28 @@ export async function loadTrajectories(
     atlasFetchOptions(environment),
   );
   return decodeTrajectories(await jsonResponse(response, "trajectory payload"));
+}
+
+export async function loadEpisodeVideos(
+  manifest: AtlasManifest,
+  fetcher: typeof fetch = fetch,
+  environment: RuntimeEnvironment = process.env.NODE_ENV as RuntimeEnvironment,
+): Promise<EpisodeVideoPayload> {
+  const reference = manifest.payloads.find(
+    (payload) => payload.kind === "episode-videos",
+  );
+  if (!reference) {
+    throw new AtlasDataError(
+      "This atlas bundle does not include synchronized episode video.",
+    );
+  }
+  const response = await fetcher(
+    `${BUNDLE_BASE}/${reference.filename}`,
+    atlasFetchOptions(environment),
+  );
+  return decodeEpisodeVideos(
+    await jsonResponse(response, "episode-video payload"),
+  );
 }
 
 export async function loadDemoBundle(
