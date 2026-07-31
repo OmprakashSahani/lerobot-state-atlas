@@ -5,6 +5,7 @@ import math
 import torch
 from torch import Tensor
 
+from lerobot_state_atlas.orientation import validate_rotation_matrices
 from lerobot_state_atlas.urdf import JointDefinition, RobotModel
 
 
@@ -28,24 +29,17 @@ class ToolTrajectory:
     def __post_init__(self) -> None:
         if self.positions.ndim != 2 or self.positions.shape[1] != 3:
             raise ValueError("Trajectory positions must have shape (num_frames, 3).")
+        if self.positions.shape[0] == 0:
+            raise ValueError("Trajectory must contain at least one point.")
 
-        if self.rotation_matrices.ndim != 3 or self.rotation_matrices.shape[1:] != (
-            3,
-            3,
-        ):
-            raise ValueError(
-                "Trajectory rotation matrices must have shape (num_frames, 3, 3)."
-            )
+        rotation_matrices = validate_rotation_matrices(self.rotation_matrices)
 
-        if self.rotation_matrices.shape[0] != self.positions.shape[0]:
+        if rotation_matrices.shape[0] != self.positions.shape[0]:
             raise ValueError(
                 "Trajectory position and rotation frame counts must match."
             )
 
-        if not torch.isfinite(self.rotation_matrices).all().item():
-            raise ValueError(
-                "Trajectory rotation matrices must contain only finite values."
-            )
+        object.__setattr__(self, "rotation_matrices", rotation_matrices)
 
         if (
             self.episode_indices is not None

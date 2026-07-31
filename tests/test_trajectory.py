@@ -460,7 +460,7 @@ def test_compute_tool_trajectory_rejects_nonfinite_states(
 
 
 def test_tool_trajectory_rejects_rotation_shape() -> None:
-    with pytest.raises(ValueError, match="must have shape \\(num_frames, 3, 3\\)"):
+    with pytest.raises(ValueError, match="must have shape \\(num_matrices, 3, 3\\)"):
         ToolTrajectory(
             arm="left",
             link_name="tool0",
@@ -483,10 +483,20 @@ def test_tool_trajectory_rejects_nonfinite_rotations() -> None:
     rotation_matrices = torch.eye(3, dtype=torch.float64).unsqueeze(0)
     rotation_matrices[0, 0, 0] = float("nan")
 
-    with pytest.raises(ValueError, match="rotation matrices.*finite values"):
+    with pytest.raises(ValueError, match="Rotation matrices.*finite values"):
         ToolTrajectory(
             arm="left",
             link_name="tool0",
             positions=torch.zeros((1, 3), dtype=torch.float64),
             rotation_matrices=rotation_matrices,
+        )
+
+
+def test_tool_trajectory_rejects_mathematically_invalid_rotations() -> None:
+    with pytest.raises(ValueError, match="must be orthonormal"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((1, 3), dtype=torch.float64),
+            rotation_matrices=(2.0 * torch.eye(3, dtype=torch.float64)).unsqueeze(0),
         )
