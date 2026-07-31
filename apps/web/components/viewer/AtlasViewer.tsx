@@ -61,12 +61,18 @@ function UncommonEpisodesSection({
   episodeIds,
   radiusResult,
   selection,
+  trajectories,
+  onCheckPlayback,
+  onOpenPlayback,
 }: {
   coverage: CoveragePayload;
   episodeCount: number;
   episodeIds: readonly number[];
   radiusResult: ReturnType<typeof queryRadius> | null;
   selection: VoxelSelection | null;
+  trajectories: TrajectoryState;
+  onCheckPlayback: () => void;
+  onOpenPlayback: (episodeId: number) => void;
 }) {
   const [radiusScopeSelection, setRadiusScopeSelection] =
     useState<VoxelSelection | null>(null);
@@ -98,6 +104,13 @@ function UncommonEpisodesSection({
     ],
   );
   const scopeLabel = usesRadiusScope ? "selected radius" : "entire coverage";
+  const availableEpisodeIds = useMemo(
+    () =>
+      trajectories.status === "ready"
+        ? new Set(trajectories.data.episodes.map((episode) => episode.episodeId))
+        : null,
+    [trajectories],
+  );
 
   return (
     <section
@@ -154,6 +167,29 @@ function UncommonEpisodesSection({
         {scores.length} {scores.length === 1 ? "episode" : "episodes"} ranked
         for {scopeLabel}.
       </p>
+      {trajectories.status === "idle" ? (
+        <button
+          className="compact-button uncommon-playback-check"
+          type="button"
+          onClick={onCheckPlayback}
+        >
+          Check playback availability
+        </button>
+      ) : null}
+      {trajectories.status === "loading" ? (
+        <p className="uncommon-playback-state" aria-busy="true">
+          Checking playback availability…
+        </p>
+      ) : null}
+      {trajectories.status === "error" ? (
+        <button
+          className="compact-button uncommon-playback-check"
+          type="button"
+          onClick={onCheckPlayback}
+        >
+          Retry playback availability
+        </button>
+      ) : null}
       {scores.length === 0 && usesRadiusScope ? (
         <p className="uncommon-special-state">
           No episode evidence exists in the current radius.
@@ -188,6 +224,36 @@ function UncommonEpisodesSection({
                   </dd>
                 </div>
               </dl>
+              <div className="uncommon-playback-availability">
+                {trajectories.status === "idle" ? (
+                  <p>Playback availability not loaded.</p>
+                ) : null}
+                {trajectories.status === "loading" ? (
+                  <p>Playback availability loading.</p>
+                ) : null}
+                {trajectories.status === "error" ? (
+                  <p>Playback availability could not be loaded.</p>
+                ) : null}
+                {availableEpisodeIds?.has(result.episodeId) ? (
+                  <>
+                    <p id={`episode-${result.episodeId}-playback-status`}>
+                      Playback available
+                    </p>
+                    <button
+                      aria-describedby={`episode-${result.episodeId}-playback-status`}
+                      className="compact-button"
+                      type="button"
+                      onClick={() => onOpenPlayback(result.episodeId)}
+                    >
+                      Open Episode {result.episodeId} playback
+                    </button>
+                  </>
+                ) : null}
+                {availableEpisodeIds !== null &&
+                !availableEpisodeIds.has(result.episodeId) ? (
+                  <p>Coverage evidence only — trajectory not exported.</p>
+                ) : null}
+              </div>
             </li>
           ))}
         </ol>
@@ -217,6 +283,11 @@ export function AtlasViewer() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previousVideoSource = useRef<string | null>(null);
   const spacingInputRef = useRef<HTMLInputElement>(null);
+  const episodeSelectorRef = useRef<HTMLSelectElement>(null);
+  const playbackSectionRef = useRef<HTMLElement>(null);
+  const trajectoryLoadRef = useRef<Promise<TrajectoryPayload> | null>(null);
+  const requestedEpisodeIdRef = useRef<number | null>(null);
+  const [playbackFocusToken, setPlaybackFocusToken] = useState(0);
 
   useEffect(() => {
     if (atlas.status === "ready" && viewer.spacing === 0.8) {
@@ -226,13 +297,49 @@ export function AtlasViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [atlas.status]);
 
-  const activatePlayback = () => {
-    if (atlas.status !== "ready" || trajectories.status !== "idle") return;
+  const selectLoadedPlaybackEpisode = (
+    data: TrajectoryPayload,
+    requestedEpisodeId?: number,
+  ) => {
+    const requestedEpisode =
+      requestedEpisodeId === undefined
+        ? undefined
+        : data.episodes.find(
+            (candidate) => candidate.episodeId === requestedEpisodeId,
+          );
+    const selectedEpisode = requestedEpisode ?? data.episodes[0];
+    setEpisodeId(selectedEpisode.episodeId);
+    setPlayback((state) => ({ ...state, frame: 0, playing: false }));
+    if (requestedEpisode !== undefined) {
+      setPlaybackFocusToken((token) => token + 1);
+    }
+  };
+
+  const activatePlayback = (requestedEpisodeId?: number) => {
+    if (atlas.status !== "ready") return;
+    if (trajectories.status === "ready") {
+      selectLoadedPlaybackEpisode(trajectories.data, requestedEpisodeId);
+      return;
+    }
+    if (
+      requestedEpisodeId !== undefined &&
+      requestedEpisodeIdRef.current === null
+    ) {
+      requestedEpisodeIdRef.current = requestedEpisodeId;
+    }
+    if (trajectoryLoadRef.current !== null) return;
     setTrajectories({ status: "loading" });
-    loadTrajectories(atlas.data.manifest)
-      .then((data) => {
+    const request = loadTrajectories(atlas.data.manifest);
+    trajectoryLoadRef.current = request;
+    request.then(
+      (data) => {
+        const requestedEpisode = requestedEpisodeIdRef.current;
+        requestedEpisodeIdRef.current = null;
         setTrajectories({ status: "ready", data });
-        setEpisodeId(data.episodes[0].episodeId);
+        selectLoadedPlaybackEpisode(
+          data,
+          requestedEpisode === null ? undefined : requestedEpisode,
+        );
         if (
           atlas.data.manifest.payloads.some(
             (payload) => payload.kind === "episode-videos",
@@ -254,13 +361,16 @@ export function AtlasViewer() {
               }),
             );
         }
-      })
-      .catch((error: unknown) =>
+      },
+      (error: unknown) => {
+        trajectoryLoadRef.current = null;
+        requestedEpisodeIdRef.current = null;
         setTrajectories({
           status: "error",
           message: error instanceof Error ? error.message : "Trajectory playback failed to load.",
-        }),
-      );
+        });
+      },
+    );
   };
 
   const episode =
@@ -302,6 +412,12 @@ export function AtlasViewer() {
       ? episodeVideos.data.cameras.find((item) => item.cameraId === cameraId) ??
         null
       : null;
+
+  useEffect(() => {
+    if (playbackFocusToken === 0) return;
+    episodeSelectorRef.current?.focus();
+    playbackSectionRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [playbackFocusToken]);
 
   useEffect(() => {
     if (!playback.playing || !episode || atlas.status !== "ready") {
@@ -630,17 +746,20 @@ export function AtlasViewer() {
           episodeIds={manifest.dataset.episodeIds}
           radiusResult={radiusResult}
           selection={viewer.selection}
+          trajectories={trajectories}
+          onCheckPlayback={() => activatePlayback()}
+          onOpenPlayback={activatePlayback}
         />
 
-        <section className="control-section" aria-labelledby="playback-heading">
+        <section className="control-section" aria-labelledby="playback-heading" ref={playbackSectionRef}>
           <div className="section-title-row"><h2 id="playback-heading">Trajectory playback</h2><span>Optional payload</span></div>
-          {trajectories.status === "idle" ? <button className="compact-button" type="button" onClick={activatePlayback}>Load playback</button> : null}
+          {trajectories.status === "idle" ? <button className="compact-button" type="button" onClick={() => activatePlayback()}>Load playback</button> : null}
           {trajectories.status === "loading" ? <p role="status">Loading trajectories…</p> : null}
           {trajectories.status === "error" ? <p role="alert">{trajectories.message}</p> : null}
           {trajectories.status === "ready" && episode ? (
             <div className="playback-controls">
               <label className="field-label" htmlFor="episode-selector">Episode</label>
-              <select id="episode-selector" value={episode.episodeId} onChange={(event) => { setEpisodeId(Number(event.target.value)); setPlayback((state) => ({ ...state, frame: 0, playing: false })); }}>
+              <select ref={episodeSelectorRef} id="episode-selector" value={episode.episodeId} onChange={(event) => { setEpisodeId(Number(event.target.value)); setPlayback((state) => ({ ...state, frame: 0, playing: false })); }}>
                 {trajectories.data.episodes.map((item) => <option key={item.episodeId} value={item.episodeId}>Episode {item.episodeId}</option>)}
               </select>
               <div className="button-row">

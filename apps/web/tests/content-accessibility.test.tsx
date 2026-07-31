@@ -182,8 +182,18 @@ function currentViewerCanvasProps() {
   return viewerCanvasProps;
 }
 
+function rankedEpisodeRow(episodeId: number): HTMLElement {
+  const ranking = screen.getByRole("list", {
+    name: /Uncommon-space episode ranking/,
+  });
+  const row = within(ranking).getByText(`Episode ${episodeId}`).closest("li");
+  if (row === null) throw new Error(`Episode ${episodeId} row was not rendered.`);
+  return row;
+}
+
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   setSpacingMock.mockClear();
   activeManifest = manifest;
   activeCoverage = coverage;
@@ -357,6 +367,134 @@ describe("accessible product content", () => {
       "aria-live",
       "polite",
     );
+    expect(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    ).toBeVisible();
+    expect(screen.getAllByText("Playback availability not loaded.")).toHaveLength(
+      manifest.dataset.episodeCount,
+    );
+    expect(loadTrajectories).not.toHaveBeenCalled();
+  });
+
+  it("checks ranked playback availability with one shared lazy request", async () => {
+    render(<AtlasViewer />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    );
+
+    expect(screen.getByText("Checking playback availability…")).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(loadTrajectories).toHaveBeenCalledTimes(1);
+    expect(
+      await within(rankedEpisodeRow(0)).findByText("Playback available"),
+    ).toBeVisible();
+    const availableButton = within(rankedEpisodeRow(0)).getByRole("button", {
+      name: "Open Episode 0 playback",
+    });
+    expect(availableButton).toHaveAttribute(
+      "aria-describedby",
+      "episode-0-playback-status",
+    );
+    expect(
+      within(rankedEpisodeRow(2)).getByText(
+        "Coverage evidence only — trajectory not exported.",
+      ),
+    ).toBeVisible();
+    expect(
+      within(rankedEpisodeRow(2)).queryByRole("button", {
+        name: "Open Episode 2 playback",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shares one in-flight request between both activation actions", async () => {
+    let resolveTrajectories!: (payload: TrajectoryPayload) => void;
+    vi.mocked(loadTrajectories).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveTrajectories = resolve;
+      }),
+    );
+    render(<AtlasViewer />);
+    const checkButton = screen.getByRole("button", {
+      name: "Check playback availability",
+    });
+    const loadButton = screen.getByRole("button", { name: "Load playback" });
+
+    fireEvent.click(checkButton);
+    fireEvent.click(loadButton);
+    fireEvent.click(checkButton);
+    expect(loadTrajectories).toHaveBeenCalledTimes(1);
+
+    resolveTrajectories(positionOnlyTrajectories);
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+  });
+
+  it("opens the exact ranked episode and preserves speed and loop", async () => {
+    render(<AtlasViewer />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    );
+    await within(rankedEpisodeRow(1)).findByText("Playback available");
+
+    fireEvent.change(screen.getByLabelText("Playback speed"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(screen.getByLabelText("Loop playback"));
+    fireEvent.change(screen.getByLabelText("Timeline"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    fireEvent.click(
+      within(rankedEpisodeRow(1)).getByRole("button", {
+        name: "Open Episode 1 playback",
+      }),
+    );
+
+    expect(screen.getByLabelText("Episode")).toHaveValue("1");
+    expect(screen.getByLabelText("Episode")).toHaveFocus();
+    expect(screen.getByLabelText("Timeline")).toHaveValue("0");
+    expect(screen.getByRole("button", { name: "Play" })).toBeVisible();
+    expect(screen.getByLabelText("Playback speed")).toHaveValue("2");
+    expect(screen.getByLabelText("Loop playback")).toBeChecked();
+    expect(currentViewerCanvasProps().episode?.episodeId).toBe(1);
+    expect(currentViewerCanvasProps().orientationEpisode?.episodeId).toBe(1);
+    expect(currentViewerCanvasProps().recordedGripperEpisode?.episodeId).toBe(
+      1,
+    );
+  });
+
+  it("keeps rankings honest after loading failure and permits retry", async () => {
+    vi.mocked(loadTrajectories)
+      .mockRejectedValueOnce(new Error("Trajectory fixture failed."))
+      .mockResolvedValueOnce(positionOnlyTrajectories);
+    render(<AtlasViewer />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    );
+
+    expect(await screen.findByText("Trajectory fixture failed.")).toHaveAttribute(
+      "role",
+      "alert",
+    );
+    expect(
+      screen.getAllByText("Playback availability could not be loaded."),
+    ).toHaveLength(manifest.dataset.episodeCount);
+    expect(
+      screen.getByRole("list", {
+        name: "Uncommon-space episode ranking for entire coverage",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Coverage evidence only — trajectory not exported."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry playback availability" }),
+    );
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+    expect(loadTrajectories).toHaveBeenCalledTimes(2);
   });
 
   it("disables radius scoring and provides help before voxel selection", () => {
@@ -488,7 +626,8 @@ describe("accessible product content", () => {
   it("exposes accessible playback controls after lazy activation", async () => {
     render(<AtlasViewer />);
     screen.getByRole("button", { name: "Load playback" }).click();
-    expect(await screen.findByLabelText("Episode")).toBeVisible();
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+    expect(loadTrajectories).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Play" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Restart" })).toBeVisible();
     expect(screen.getByLabelText("Timeline")).toBeVisible();

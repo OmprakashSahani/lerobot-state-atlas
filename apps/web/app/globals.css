@@ -914,6 +914,38 @@ a {
   color: var(--muted);
 }
 
+.uncommon-playback-check {
+  margin-top: 0.7rem;
+  width: 100%;
+}
+
+.uncommon-playback-state,
+.uncommon-playback-availability p {
+  color: var(--muted);
+  font-size: 0.6rem;
+  line-height: 1.45;
+}
+
+.uncommon-playback-state {
+  margin: 0.7rem 0 0;
+}
+
+.uncommon-playback-availability {
+  border-top: 1px solid rgba(103, 232, 249, 0.12);
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+}
+
+.uncommon-playback-availability p {
+  margin: 0;
+}
+
+.uncommon-playback-availability .compact-button {
+  justify-self: start;
+}
+
 .playback-controls {
   display: grid;
   gap: 0.35rem;
