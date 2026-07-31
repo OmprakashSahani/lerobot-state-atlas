@@ -1,8 +1,8 @@
-"""Constants and structural rules for browser-data schema version 1.1."""
+"""Constants and structural rules for browser-data schema version 1.2."""
 
 SCHEMA_NAME = "lerobot-state-atlas.browser-data"
 SCHEMA_MAJOR = 1
-SCHEMA_MINOR = 1
+SCHEMA_MINOR = 2
 
 MANIFEST_FILENAME = "manifest.json"
 COVERAGE_FILENAME = "coverage.json"
@@ -21,6 +21,7 @@ MANIFEST_FIELDS = {
     "sceneBounds",
     "payloads",
 }
+TRAJECTORY_STATE_FIELD = "trajectoryState"
 
 SCHEMA_FIELDS = {"name", "major", "minor"}
 EXPORTER_FIELDS = {
@@ -109,6 +110,31 @@ TRAJECTORY_EPISODE_FIELDS = {
     "timestampsSeconds",
     "leftPositionsXyz",
     "rightPositionsXyz",
+}
+TRAJECTORY_ORIENTATION_FIELDS = {
+    "leftOrientationsXyzw",
+    "rightOrientationsXyzw",
+}
+TRAJECTORY_GRIPPER_FIELDS = {
+    "leftRecordedGripperValues",
+    "rightRecordedGripperValues",
+}
+TRAJECTORY_STATE_FIELDS = {"orientation", "gripper"}
+TRAJECTORY_ORIENTATION_CAPABILITY_FIELDS = {
+    "available",
+    "representation",
+    "componentOrder",
+    "frame",
+    "samplePolicy",
+}
+TRAJECTORY_GRIPPER_CAPABILITY_FIELDS = {
+    "available",
+    "leftSourceComponent",
+    "rightSourceComponent",
+    "valueSemantics",
+    "physicalJawWidthCalibrated",
+    "polarityEstablished",
+    "visualizationGeometryCalibrated",
 }
 
 EPISODE_VIDEO_PAYLOAD_FIELDS = {

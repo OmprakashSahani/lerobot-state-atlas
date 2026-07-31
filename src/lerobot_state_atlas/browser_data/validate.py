@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 import json
 from math import isfinite
+from math import sqrt
 from pathlib import Path, PurePath, PurePosixPath
 import re
 from typing import Any
@@ -26,10 +27,17 @@ from lerobot_state_atlas.browser_data.schema import (
     ROBOT_FIELDS,
     SCHEMA_FIELDS,
     SCHEMA_MAJOR,
+    SCHEMA_MINOR,
     SCHEMA_NAME,
     TOTAL_FIELDS,
     TRAJECTORY_EPISODE_FIELDS,
+    TRAJECTORY_GRIPPER_CAPABILITY_FIELDS,
+    TRAJECTORY_GRIPPER_FIELDS,
+    TRAJECTORY_ORIENTATION_CAPABILITY_FIELDS,
+    TRAJECTORY_ORIENTATION_FIELDS,
     TRAJECTORY_PAYLOAD_FIELDS,
+    TRAJECTORY_STATE_FIELD,
+    TRAJECTORY_STATE_FIELDS,
     TRANSFORM_FIELDS,
 )
 from lerobot_state_atlas.browser_data.serialize import sha256_file
@@ -39,17 +47,30 @@ class BrowserDataValidationError(ValueError):
     """Raised when a browser-data bundle violates the v1 contract."""
 
 
+# Browser JSON round-tripping can introduce decimal representation noise. This
+# remains much looser than float64 FK accuracy while rejecting visibly scaled
+# quaternions rather than repairing them.
+QUATERNION_NORM_TOLERANCE = 1e-6
+
+
 def _fail(message: str) -> None:
     raise BrowserDataValidationError(message)
 
 
-def _object(value: Any, fields: set[str], label: str) -> Mapping[str, Any]:
+def _object(
+    value: Any,
+    fields: set[str],
+    label: str,
+    *,
+    optional_fields: set[str] | None = None,
+) -> Mapping[str, Any]:
     if not isinstance(value, dict):
         _fail(f"{label} must be an object.")
 
     actual = set(value)
     missing = fields - actual
-    unsupported = actual - fields
+    allowed = fields | (optional_fields or set())
+    unsupported = actual - allowed
 
     if missing:
         _fail(f"{label} is missing fields: {', '.join(sorted(missing))}.")
@@ -101,7 +122,7 @@ def _vector3(value: Any, label: str) -> tuple[float, float, float]:
     return (values[0], values[1], values[2])
 
 
-def _schema(value: Any, label: str) -> None:
+def _schema(value: Any, label: str) -> int:
     schema = _object(value, SCHEMA_FIELDS, f"{label}.schema")
 
     if schema["name"] != SCHEMA_NAME:
@@ -110,7 +131,10 @@ def _schema(value: Any, label: str) -> None:
     if schema["major"] != SCHEMA_MAJOR:
         _fail(f"{label} uses an unsupported schema major version.")
 
-    _integer(schema["minor"], f"{label}.schema.minor")
+    minor = _integer(schema["minor"], f"{label}.schema.minor")
+    if minor > SCHEMA_MINOR:
+        _fail(f"{label} uses an unsupported schema minor version.")
+    return minor
 
 
 def _reject_absolute_paths(value: Any, label: str = "bundle") -> None:
@@ -134,8 +158,15 @@ def _load_json(path: Path, label: str) -> Any:
 
 
 def _validate_manifest(manifest: Any) -> Mapping[str, Any]:
-    manifest = _object(manifest, MANIFEST_FIELDS, "manifest")
-    _schema(manifest["schema"], "manifest")
+    if not isinstance(manifest, dict):
+        _fail("manifest must be an object.")
+    minor = _schema(manifest.get("schema"), "manifest")
+    manifest = _object(
+        manifest,
+        MANIFEST_FIELDS,
+        "manifest",
+        optional_fields={TRAJECTORY_STATE_FIELD} if minor >= 2 else None,
+    )
     _string(manifest["bundleId"], "manifest.bundleId")
 
     exporter = _object(manifest["exporter"], EXPORTER_FIELDS, "manifest.exporter")
@@ -298,8 +329,58 @@ def _validate_manifest(manifest: Any) -> Mapping[str, Any]:
     if "coverage" not in kinds:
         _fail("A coverage payload is required.")
 
+    has_trajectories = "trajectories" in kinds
+    has_trajectory_state = TRAJECTORY_STATE_FIELD in manifest
+    if minor >= 2 and has_trajectories != has_trajectory_state:
+        _fail(
+            "Schema v1.2 manifests must declare trajectoryState exactly when "
+            "a trajectory payload is referenced."
+        )
+    if has_trajectory_state:
+        _validate_trajectory_state(manifest[TRAJECTORY_STATE_FIELD])
+
     _reject_absolute_paths(manifest)
     return manifest
+
+
+def _validate_trajectory_state(value: Any) -> tuple[bool, bool]:
+    state = _object(value, TRAJECTORY_STATE_FIELDS, "manifest.trajectoryState")
+    orientation = _object(
+        state["orientation"],
+        TRAJECTORY_ORIENTATION_CAPABILITY_FIELDS,
+        "manifest.trajectoryState.orientation",
+    )
+    gripper = _object(
+        state["gripper"],
+        TRAJECTORY_GRIPPER_CAPABILITY_FIELDS,
+        "manifest.trajectoryState.gripper",
+    )
+    if not isinstance(orientation["available"], bool):
+        _fail("manifest.trajectoryState.orientation.available must be boolean.")
+    expected_orientation = {
+        "representation": "unit-quaternion",
+        "componentOrder": ["x", "y", "z", "w"],
+        "frame": "canonical-shared-world",
+        "samplePolicy": "recorded-sample",
+    }
+    for field, expected in expected_orientation.items():
+        if orientation[field] != expected:
+            _fail(f"manifest.trajectoryState.orientation.{field} must be {expected!r}.")
+
+    if not isinstance(gripper["available"], bool):
+        _fail("manifest.trajectoryState.gripper.available must be boolean.")
+    expected_gripper = {
+        "leftSourceComponent": "left_gripper.pos",
+        "rightSourceComponent": "right_gripper.pos",
+        "valueSemantics": "raw-device-specific-unproven",
+        "physicalJawWidthCalibrated": False,
+        "polarityEstablished": False,
+        "visualizationGeometryCalibrated": False,
+    }
+    for field, expected in expected_gripper.items():
+        if gripper[field] != expected:
+            _fail(f"manifest.trajectoryState.gripper.{field} must be {expected!r}.")
+    return bool(orientation["available"]), bool(gripper["available"])
 
 
 def _validate_coverage(value: Any) -> dict[str, int]:
@@ -414,24 +495,61 @@ def _validate_coverage(value: Any) -> dict[str, int]:
 def _validate_trajectories(
     value: Any,
     selected_episodes: set[int],
-) -> set[int]:
+) -> tuple[set[int], bool, bool]:
     payload = _object(value, TRAJECTORY_PAYLOAD_FIELDS, "trajectory payload")
-    _schema(payload["schema"], "trajectory payload")
+    minor = _schema(payload["schema"], "trajectory payload")
     episodes = payload["episodes"]
     if not isinstance(episodes, list) or not episodes:
         _fail("trajectory payload episodes must be a non-empty array.")
     episode_ids: list[int] = []
+    orientation_presence: list[bool] = []
+    gripper_presence: list[bool] = []
     for index, episode_value in enumerate(episodes):
         label = f"trajectory payload.episodes[{index}]"
-        episode = _object(episode_value, TRAJECTORY_EPISODE_FIELDS, label)
+        episode = _object(
+            episode_value,
+            TRAJECTORY_EPISODE_FIELDS,
+            label,
+            optional_fields=(
+                TRAJECTORY_ORIENTATION_FIELDS | TRAJECTORY_GRIPPER_FIELDS
+                if minor >= 2
+                else None
+            ),
+        )
         episode_id = _integer(episode["episodeId"], f"{label}.episodeId")
         episode_ids.append(episode_id)
+        has_left_orientation = "leftOrientationsXyzw" in episode
+        has_right_orientation = "rightOrientationsXyzw" in episode
+        if has_left_orientation != has_right_orientation:
+            _fail(f"{label} must contain both left and right orientation arrays.")
+        has_orientation = has_left_orientation
+        orientation_presence.append(has_orientation)
+        has_left_gripper = "leftRecordedGripperValues" in episode
+        has_right_gripper = "rightRecordedGripperValues" in episode
+        if has_left_gripper != has_right_gripper:
+            _fail(f"{label} must contain both left and right gripper arrays.")
+        has_gripper = has_left_gripper
+        gripper_presence.append(has_gripper)
         arrays = [
             episode["frameIndices"],
             episode["timestampsSeconds"],
             episode["leftPositionsXyz"],
             episode["rightPositionsXyz"],
         ]
+        if has_orientation:
+            arrays.extend(
+                [
+                    episode["leftOrientationsXyzw"],
+                    episode["rightOrientationsXyzw"],
+                ]
+            )
+        if has_gripper:
+            arrays.extend(
+                [
+                    episode["leftRecordedGripperValues"],
+                    episode["rightRecordedGripperValues"],
+                ]
+            )
         if any(not isinstance(array, list) for array in arrays):
             _fail(f"{label} trajectory fields must be arrays.")
         size = len(arrays[0])
@@ -439,17 +557,57 @@ def _validate_trajectories(
             _fail(f"{label} trajectory arrays must have one equal, non-zero length.")
         for frame in episode["frameIndices"]:
             _integer(frame, f"{label}.frameIndices[]")
+        if minor >= 2 and episode["frameIndices"] != sorted(
+            set(episode["frameIndices"])
+        ):
+            _fail(f"{label}.frameIndices must be sorted and distinct.")
         for timestamp in episode["timestampsSeconds"]:
             _number(timestamp, f"{label}.timestampsSeconds[]")
+        if minor >= 2 and episode["timestampsSeconds"] != sorted(
+            episode["timestampsSeconds"]
+        ):
+            _fail(f"{label}.timestampsSeconds must be monotonic.")
         for arm in ("leftPositionsXyz", "rightPositionsXyz"):
             for position in episode[arm]:
                 _vector3(position, f"{label}.{arm}[]")
+        if has_orientation:
+            for arm in ("leftOrientationsXyzw", "rightOrientationsXyzw"):
+                for quaternion in episode[arm]:
+                    if (
+                        not isinstance(quaternion, list)
+                        or len(quaternion) != 4
+                        or any(isinstance(component, bool) for component in quaternion)
+                    ):
+                        _fail(
+                            f"{label}.{arm}[] must contain four numbers in XYZW order."
+                        )
+                    components = [
+                        _number(component, f"{label}.{arm}[]")
+                        for component in quaternion
+                    ]
+                    norm = sqrt(sum(component * component for component in components))
+                    if abs(norm - 1.0) > QUATERNION_NORM_TOLERANCE:
+                        _fail(
+                            f"{label}.{arm}[] must be unit length within "
+                            f"{QUATERNION_NORM_TOLERANCE:g}."
+                        )
+        if has_gripper:
+            for arm in (
+                "leftRecordedGripperValues",
+                "rightRecordedGripperValues",
+            ):
+                for gripper_value in episode[arm]:
+                    _number(gripper_value, f"{label}.{arm}[]")
     if episode_ids != sorted(set(episode_ids)):
         _fail("trajectory episodes must be sorted and distinct.")
     if not set(episode_ids).issubset(selected_episodes):
         _fail("trajectory episodes must be included in the coverage episode selection.")
+    if len(set(orientation_presence)) != 1:
+        _fail("Orientation capability must be present in every trajectory episode.")
+    if len(set(gripper_presence)) != 1:
+        _fail("Gripper capability must be present in every trajectory episode.")
     _reject_absolute_paths(payload)
-    return set(episode_ids)
+    return set(episode_ids), orientation_presence[0], gripper_presence[0]
 
 
 def _relative_media_path(value: Any, label: str) -> PurePosixPath:
@@ -671,6 +829,7 @@ def validate_browser_data(path: str | Path) -> Mapping[str, Any]:
     )
 
     payload_values: dict[str, Any] = {}
+    manifest_minor = int(manifest["schema"]["minor"])
     for payload in manifest["payloads"]:
         payload_path = bundle_path / payload["filename"]
         if not payload_path.is_file():
@@ -683,6 +842,14 @@ def validate_browser_data(path: str | Path) -> Mapping[str, Any]:
             payload_path,
             f"{payload['kind']} payload",
         )
+        payload_minor = _schema(
+            payload_values[payload["kind"]].get("schema")
+            if isinstance(payload_values[payload["kind"]], dict)
+            else None,
+            f"{payload['kind']} payload",
+        )
+        if payload_minor != manifest_minor:
+            _fail(f"{payload['kind']} payload schema version must match the manifest.")
 
     coverage_totals = _validate_coverage(payload_values["coverage"])
     for key, expected in coverage_totals.items():
@@ -691,10 +858,28 @@ def validate_browser_data(path: str | Path) -> Mapping[str, Any]:
 
     trajectory_episode_ids: set[int] | None = None
     if "trajectories" in payload_values:
-        trajectory_episode_ids = _validate_trajectories(
+        (
+            trajectory_episode_ids,
+            orientation_available,
+            gripper_available,
+        ) = _validate_trajectories(
             payload_values["trajectories"],
             set(manifest["dataset"]["episodeIds"]),
         )
+        if manifest_minor >= 2:
+            declared_orientation, declared_gripper = _validate_trajectory_state(
+                manifest[TRAJECTORY_STATE_FIELD]
+            )
+            if declared_orientation != orientation_available:
+                _fail(
+                    "Manifest orientation capability does not agree with the "
+                    "trajectory payload."
+                )
+            if declared_gripper != gripper_available:
+                _fail(
+                    "Manifest gripper capability does not agree with the "
+                    "trajectory payload."
+                )
 
     if "episode-videos" in payload_values:
         if manifest["schema"]["minor"] < 1:
