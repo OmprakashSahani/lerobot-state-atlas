@@ -5,6 +5,10 @@ from lerobot_state_atlas.coverage import (
     WorkspaceCoverage,
     WorkspaceCoverageAccumulator,
 )
+from lerobot_state_atlas.export_measurement import (
+    ArmCoverageCounts,
+    ExportMeasurementSession,
+)
 from lerobot_state_atlas.state import iter_state_batches
 from lerobot_state_atlas.trajectory import (
     build_trlc_dk1_joint_component_map,
@@ -37,6 +41,7 @@ def aggregate_workspace_coverages(
     episode_batch_size: int,
     arm_transforms: Mapping[str, RigidTransform] | None = None,
     revision: str | None = None,
+    measurement: ExportMeasurementSession | None = None,
 ) -> WorkspaceAggregation:
     """Aggregate dual-arm workspace coverage in bounded episode batches."""
     if not episodes:
@@ -94,9 +99,19 @@ def aggregate_workspace_coverages(
         )
     )
 
-    for batch in batch_iterator:
+    iterator = iter(batch_iterator)
+    while True:
+        batch_started_at = (
+            measurement.begin_coverage_batch() if measurement is not None else None
+        )
+        try:
+            batch = next(iterator)
+        except StopIteration:
+            break
+
         num_batches += 1
-        num_frames += int(batch.states.shape[0])
+        batch_frame_count = int(batch.states.shape[0])
+        num_frames += batch_frame_count
 
         for arm, accumulator in accumulators.items():
             local_trajectory = compute_tool_trajectory(
@@ -112,6 +127,29 @@ def aggregate_workspace_coverages(
                 normalized_arm_transforms[arm],
             )
             accumulator.update(world_trajectory)
+
+        if measurement is not None and batch_started_at is not None:
+            episode_ids = tuple(
+                int(value)
+                for value in batch.episode_indices.detach()
+                .to(device="cpu")
+                .unique(sorted=True)
+                .tolist()
+            )
+            measurement.complete_coverage_batch(
+                started_at=batch_started_at,
+                episode_ids=episode_ids,
+                frame_count=batch_frame_count,
+                cumulative_frame_count=num_frames,
+                arms={
+                    arm: ArmCoverageCounts(
+                        occupied_entries=accumulator.cumulative_occupied_entries,
+                        csr_incidence=accumulator.cumulative_episode_incidence,
+                        raw_visits=accumulator.cumulative_raw_visits,
+                    )
+                    for arm, accumulator in accumulators.items()
+                },
+            )
 
     if num_batches == 0:
         raise ValueError("Episode loading produced no state batches.")

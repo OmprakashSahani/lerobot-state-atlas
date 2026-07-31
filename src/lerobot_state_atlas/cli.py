@@ -17,6 +17,11 @@ from lerobot_state_atlas.coverage import (
     compute_workspace_coverage,
 )
 from lerobot_state_atlas.dataset import load_dataset_summary
+from lerobot_state_atlas.export_measurement import (
+    CoverageBatchMeasurement,
+    ExportMeasurementSession,
+    validate_measurement_report_path,
+)
 from lerobot_state_atlas.interactive import (
     save_interactive_workspace_coverage_heatmap,
     save_interactive_workspace_heatmap,
@@ -742,6 +747,17 @@ def export_browser_data_command(
         "-o",
         help="Destination browser-data directory.",
     ),
+    measurement_report_path: Path | None = typer.Option(
+        None,
+        "--measurement-report",
+        help=(
+            "Write machine-dependent export timings and scale measurements to "
+            "an atomic JSON report outside the browser-data bundle."
+        ),
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
 ) -> None:
     """Export deterministic, versioned data for the browser viewer."""
     try:
@@ -761,6 +777,8 @@ def export_browser_data_command(
             raise ValueError("Trajectory episode indices must be nonnegative.")
         if len(set(trajectory_episode)) != len(trajectory_episode):
             raise ValueError("Trajectory episode indices must be unique.")
+        if measurement_report_path is not None:
+            validate_measurement_report_path(measurement_report_path, output_path)
 
         episode_video_payload, episode_video_media = _episode_video_inputs(
             episode_video_metadata_path,
@@ -773,22 +791,61 @@ def export_browser_data_command(
         if not upstream_identity:
             raise ValueError("URDF upstream identity must not be empty.")
 
+        measurement: ExportMeasurementSession | None = None
+        if measurement_report_path is not None:
+            cumulative_episodes = 0
+
+            def report_progress(batch: CoverageBatchMeasurement) -> None:
+                nonlocal cumulative_episodes
+                cumulative_episodes += len(batch.episode_ids)
+                occupied_entries = sum(
+                    value.occupied_entries for value in batch.arms.values()
+                )
+                csr_incidence = sum(
+                    value.csr_incidence for value in batch.arms.values()
+                )
+                console.print(
+                    "Measured coverage batch "
+                    f"[bold]{batch.batch_index}[/bold]: "
+                    f"{cumulative_episodes:,} episodes, "
+                    f"{batch.cumulative_frame_count:,} frames, "
+                    f"{occupied_entries:,} occupied entries, "
+                    f"{csr_incidence:,} CSR incidences, "
+                    f"{batch.elapsed_seconds:.3f} s."
+                )
+
+            measurement = ExportMeasurementSession(
+                progress_callback=report_progress,
+            )
+
+        export_kwargs = {
+            "urdf_path": urdf_path,
+            "episodes": tuple(range(episode_start, episode_end + 1)),
+            "trajectory_episodes": tuple(sorted(trajectory_episode)),
+            "episode_batch_size": episode_batch_size,
+            "voxel_size": voxel_size,
+            "arm_spacing": arm_spacing,
+            "output_path": output_path,
+            "bundle_id": bundle_id,
+            "urdf_upstream_identity": upstream_identity,
+            "repository_path": Path.cwd(),
+            "dataset_revision": dataset_revision,
+            "episode_video_payload": episode_video_payload,
+            "episode_video_media": episode_video_media,
+        }
         result = export_browser_data(
             repo_id,
-            urdf_path=urdf_path,
-            episodes=tuple(range(episode_start, episode_end + 1)),
-            trajectory_episodes=tuple(sorted(trajectory_episode)),
-            episode_batch_size=episode_batch_size,
-            voxel_size=voxel_size,
-            arm_spacing=arm_spacing,
-            output_path=output_path,
-            bundle_id=bundle_id,
-            urdf_upstream_identity=upstream_identity,
-            repository_path=Path.cwd(),
-            dataset_revision=dataset_revision,
-            episode_video_payload=episode_video_payload,
-            episode_video_media=episode_video_media,
+            **export_kwargs,
+            **({} if measurement is None else {"measurement": measurement}),
         )
+        if measurement_report_path is not None and measurement is not None:
+            try:
+                measurement.write_report(measurement_report_path)
+            except Exception as error:
+                raise ValueError(
+                    "Browser-data bundle was installed, but the measurement report "
+                    "could not be written."
+                ) from error
     except Exception as error:
         console.print(f"[red]Failed to export browser data:[/red] {error}")
         raise typer.Exit(code=1) from error

@@ -27,6 +27,11 @@ from lerobot_state_atlas.browser_data.validate import (
     validate_browser_data,
 )
 from lerobot_state_atlas.coverage import WorkspaceCoverage
+from lerobot_state_atlas.export_measurement import (
+    ArmCoverageCounts,
+    ExportMeasurementSession,
+    measure_bundle_artifacts,
+)
 from lerobot_state_atlas.schema import DatasetSummary, FeatureSummary
 from lerobot_state_atlas.trajectory import ToolTrajectory
 from lerobot_state_atlas.transforms import RigidTransform, transform_tool_trajectory
@@ -251,6 +256,67 @@ def test_deterministic_serialization_and_manifest_generation() -> None:
     assert first[0]["exporter"]["repositoryHeadCommit"] == "b" * 40
     assert first[0]["exporter"]["workingTreeDirty"] is True
     assert "uncommitted" in first[0]["exporter"]["sourceDescription"]
+
+
+def test_measurement_reporting_does_not_change_bundle_bytes_or_checksums(
+    tmp_path: Path,
+) -> None:
+    manifest, coverage, trajectory = make_documents()
+    baseline = tmp_path / "baseline"
+    measured = tmp_path / "measured"
+    report_path = tmp_path / "reports/measurement.json"
+
+    _write_bundle(baseline, manifest, coverage, trajectory)
+    session = ExportMeasurementSession()
+    session.start_export()
+    _write_bundle(
+        measured,
+        manifest,
+        coverage,
+        trajectory,
+        measurement=session,
+    )
+    session.finish_export()
+    artifacts = measure_bundle_artifacts(measured, manifest)
+    report = session.build_report(
+        repository_id="organization/demo",
+        requested_revision="v3.0",
+        resolved_revision="c" * 40,
+        source_episode_count=2,
+        coverage_episode_ids=(0, 1),
+        trajectory_episode_ids=(0,),
+        episode_batch_size=2,
+        voxel_size=0.02,
+        arm_spacing=0.8,
+        selected_frame_count=3,
+        final_arms={
+            "left": ArmCoverageCounts(2, 3, 3),
+            "right": ArmCoverageCounts(2, 3, 3),
+        },
+        trajectory_sample_counts={0: 2},
+        artifacts=artifacts,
+    )
+    session.store_report(report)
+    session.write_report(report_path)
+
+    baseline_files = {
+        path.relative_to(baseline): path.read_bytes()
+        for path in sorted(baseline.rglob("*"))
+        if path.is_file()
+    }
+    measured_files = {
+        path.relative_to(measured): path.read_bytes()
+        for path in sorted(measured.rglob("*"))
+        if path.is_file()
+    }
+    assert measured_files == baseline_files
+    assert report_path.is_file()
+    assert not (measured / "measurement.json").exists()
+    installed_manifest = json.loads((measured / "manifest.json").read_text())
+    assert all(
+        payload["filename"] != report_path.name
+        for payload in installed_manifest["payloads"]
+    )
 
 
 def test_manifest_checksums_csr_and_aggregate_totals(tmp_path: Path) -> None:

@@ -302,6 +302,21 @@ class WorkspaceCoverageAccumulator:
             set[int],
         ] = {}
 
+    @property
+    def cumulative_occupied_entries(self) -> int:
+        """Return the number of occupied entries accumulated so far."""
+        return len(self._visit_counts)
+
+    @property
+    def cumulative_episode_incidence(self) -> int:
+        """Return exact accumulated voxel-episode incidence."""
+        return sum(len(values) for values in self._episode_ids_by_voxel.values())
+
+    @property
+    def cumulative_raw_visits(self) -> int:
+        """Return accumulated raw tool-point visits."""
+        return self._num_points
+
     def update(self, trajectory: ToolTrajectory) -> None:
         """Add one trajectory batch to the aggregate."""
         if trajectory.arm != self.arm:
