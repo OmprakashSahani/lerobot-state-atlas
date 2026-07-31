@@ -18,6 +18,13 @@ import {
   loadTrajectories,
 } from "@/lib/data/loadBundle";
 import { prepareCoverage } from "@/lib/data/prepareCoverage";
+import type {
+  AtlasData,
+  TrajectoryEpisode,
+  TrajectoryEpisodeOrientations,
+  TrajectoryEpisodeRecordedGripperValues,
+  TrajectoryPayload,
+} from "@/lib/atlas-schema/types";
 
 const manifest = decodeManifest(manifestJson);
 const manifestWithVideos = decodeManifest({
@@ -83,14 +90,82 @@ const episodeVideos = decodeEpisodeVideos({
   })),
 });
 const coverage = decodeCoverage(coverageJson);
+const positionOnlyTrajectories = decodeTrajectories(
+  trajectoriesJson,
+  manifest,
+);
 const preparedArmsForTest = prepareCoverage(manifest, coverage);
 const setSpacingMock = vi.fn();
 let activeManifest = manifest;
+let viewerCanvasProps: {
+  data: AtlasData;
+  episode: TrajectoryEpisode | null;
+  orientationEpisode: TrajectoryEpisodeOrientations | null;
+  recordedGripperEpisode: TrajectoryEpisodeRecordedGripperValues | null;
+  playbackFrame: number;
+} | null = null;
+
+function trajectoriesWithOptionalState(
+  orientationStatus: "available" | "degraded" = "available",
+  gripperStatus: "available" | "degraded" = "available",
+): TrajectoryPayload {
+  return {
+    ...positionOnlyTrajectories,
+    orientation:
+      orientationStatus === "degraded"
+        ? { status: "degraded", warning: "Invalid orientation fixture." }
+        : {
+            status: "available",
+            data: {
+              episodes: positionOnlyTrajectories.episodes.map((episode) => ({
+                episodeId: episode.episodeId,
+                leftOrientationsXyzw: episode.frameIndices.map(() => [
+                  0,
+                  0,
+                  0,
+                  1,
+                ]),
+                rightOrientationsXyzw: episode.frameIndices.map(() => [
+                  0,
+                  0,
+                  1,
+                  0,
+                ]),
+              })),
+            },
+          },
+    gripper:
+      gripperStatus === "degraded"
+        ? { status: "degraded", warning: "Invalid gripper fixture." }
+        : {
+            status: "available",
+            data: {
+              episodes: positionOnlyTrajectories.episodes.map((episode) => ({
+                episodeId: episode.episodeId,
+                leftRecordedGripperValues: episode.frameIndices.map(
+                  (_, index) => -index,
+                ),
+                rightRecordedGripperValues: episode.frameIndices.map(
+                  (_, index) => index + 2,
+                ),
+              })),
+            },
+          },
+  };
+}
+
+function currentViewerCanvasProps() {
+  if (viewerCanvasProps === null) {
+    throw new Error("ViewerCanvas has not rendered.");
+  }
+  return viewerCanvasProps;
+}
 
 afterEach(() => {
   cleanup();
   setSpacingMock.mockClear();
   activeManifest = manifest;
+  viewerCanvasProps = null;
   vi.mocked(loadTrajectories).mockResolvedValue(
     decodeTrajectories(trajectoriesJson, manifest),
   );
@@ -136,7 +211,10 @@ vi.mock("@/components/viewer/ViewerStore", () => ({
 }));
 
 vi.mock("@/components/viewer/ViewerCanvas", () => ({
-  ViewerCanvas: () => <div data-testid="viewer-canvas" />,
+  ViewerCanvas: (props: NonNullable<typeof viewerCanvasProps>) => {
+    viewerCanvasProps = props;
+    return <div data-testid="viewer-canvas" />;
+  },
 }));
 
 vi.mock("@/lib/data/loadBundle", () => ({
@@ -250,6 +328,60 @@ describe("accessible product content", () => {
     expect(screen.getByLabelText("Playback speed")).toBeVisible();
     expect(screen.getByLabelText("Loop playback")).toBeVisible();
   });
+
+  it("threads matching required and optional episodes together", async () => {
+    vi.mocked(loadTrajectories).mockResolvedValueOnce(
+      trajectoriesWithOptionalState(),
+    );
+    render(<AtlasViewer />);
+    fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+    await screen.findByLabelText("Episode");
+
+    expect(currentViewerCanvasProps().episode?.episodeId).toBe(0);
+    expect(currentViewerCanvasProps().orientationEpisode?.episodeId).toBe(0);
+    expect(currentViewerCanvasProps().recordedGripperEpisode?.episodeId).toBe(
+      0,
+    );
+
+    fireEvent.change(screen.getByLabelText("Episode"), {
+      target: { value: "1" },
+    });
+    expect(currentViewerCanvasProps().episode?.episodeId).toBe(1);
+    expect(currentViewerCanvasProps().orientationEpisode?.episodeId).toBe(1);
+    expect(currentViewerCanvasProps().recordedGripperEpisode?.episodeId).toBe(
+      1,
+    );
+  });
+
+  it.each([
+    ["orientation", "gripper"],
+    ["gripper", "orientation"],
+  ] as const)(
+    "threads available %s data when %s is degraded",
+    async (availableCapability, degradedCapability) => {
+      vi.mocked(loadTrajectories).mockResolvedValueOnce(
+        trajectoriesWithOptionalState(
+          degradedCapability === "orientation" ? "degraded" : "available",
+          degradedCapability === "gripper" ? "degraded" : "available",
+        ),
+      );
+      render(<AtlasViewer />);
+      fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+      await screen.findByLabelText("Episode");
+
+      expect(currentViewerCanvasProps().episode?.episodeId).toBe(0);
+      expect(
+        availableCapability === "orientation"
+          ? currentViewerCanvasProps().orientationEpisode?.episodeId
+          : currentViewerCanvasProps().recordedGripperEpisode?.episodeId,
+      ).toBe(0);
+      expect(
+        degradedCapability === "orientation"
+          ? currentViewerCanvasProps().orientationEpisode
+          : currentViewerCanvasProps().recordedGripperEpisode,
+      ).toBeNull();
+    },
+  );
 
   it("exposes synchronized video and switches camera and episode sources", async () => {
     activeManifest = manifestWithVideos;

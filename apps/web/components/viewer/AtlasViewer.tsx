@@ -120,6 +120,20 @@ export function AtlasViewer() {
     trajectories.status === "ready"
       ? trajectories.data.episodes.find((item) => item.episodeId === episodeId) ?? null
       : null;
+  const orientationEpisode =
+    trajectories.status === "ready" &&
+    trajectories.data.orientation.status === "available"
+      ? trajectories.data.orientation.data.episodes.find(
+          (item) => item.episodeId === episodeId,
+        ) ?? null
+      : null;
+  const recordedGripperEpisode =
+    trajectories.status === "ready" &&
+    trajectories.data.gripper.status === "available"
+      ? trajectories.data.gripper.data.episodes.find(
+          (item) => item.episodeId === episodeId,
+        ) ?? null
+      : null;
   const videoEpisode =
     episodeVideos.status === "ready"
       ? episodeVideos.data.episodes.find(
@@ -255,7 +269,13 @@ export function AtlasViewer() {
     <div className="viewer-shell">
       <div className="viewer-visuals">
         <section className="viewer-stage" aria-label="Interactive workspace scene">
-          <ViewerCanvas data={atlas.data} episode={episode} playbackFrame={playback.frame} />
+          <ViewerCanvas
+            data={atlas.data}
+            episode={episode}
+            orientationEpisode={orientationEpisode}
+            recordedGripperEpisode={recordedGripperEpisode}
+            playbackFrame={playback.frame}
+          />
           <div className="scene-badge"><span className="live-dot" aria-hidden="true" />Canonical shared world</div>
           <p className="scene-help">Click a voxel to query · Drag to orbit · Scroll to zoom</p>
         </section>

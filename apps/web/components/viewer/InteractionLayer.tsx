@@ -8,10 +8,12 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import type {
   AtlasData,
   TrajectoryEpisode,
+  TrajectoryEpisodeOrientations,
+  TrajectoryEpisodeRecordedGripperValues,
   Vector3,
 } from "@/lib/atlas-schema/types";
 import { applyRuntimeSpacing } from "@/lib/coordinates/runtimeSpacing";
-import { playbackPositions } from "@/lib/playback/controller";
+import { selectRecordedPlaybackSample } from "@/lib/playback/controller";
 import { useViewerStore } from "./ViewerStore";
 
 function WidePath({
@@ -87,10 +89,14 @@ function ToolMarker({
 export function InteractionLayer({
   data,
   episode,
+  orientationEpisode,
+  recordedGripperEpisode,
   playbackFrame,
 }: {
   data: AtlasData;
   episode: TrajectoryEpisode | null;
+  orientationEpisode: TrajectoryEpisodeOrientations | null;
+  recordedGripperEpisode: TrajectoryEpisodeRecordedGripperValues | null;
   playbackFrame: number;
 }) {
   const viewer = useViewerStore();
@@ -103,7 +109,14 @@ export function InteractionLayer({
         baseline,
       )
     : null;
-  const positions = episode ? playbackPositions(episode, playbackFrame) : null;
+  const sample = episode
+    ? selectRecordedPlaybackSample(
+        episode,
+        playbackFrame,
+        orientationEpisode ?? undefined,
+        recordedGripperEpisode ?? undefined,
+      )
+    : null;
   const leftPath = useMemo(
     () =>
       episode?.leftPositionsXyz.map((point) =>
@@ -119,12 +132,12 @@ export function InteractionLayer({
     [baseline, episode, viewer.spacing],
   );
   const travelledLeftPath = useMemo(
-    () => leftPath.slice(0, (positions?.index ?? 0) + 1),
-    [leftPath, positions?.index],
+    () => leftPath.slice(0, (sample?.index ?? 0) + 1),
+    [leftPath, sample?.index],
   );
   const travelledRightPath = useMemo(
-    () => rightPath.slice(0, (positions?.index ?? 0) + 1),
-    [positions?.index, rightPath],
+    () => rightPath.slice(0, (sample?.index ?? 0) + 1),
+    [rightPath, sample?.index],
   );
   return (
     <group name="interaction-layer">
@@ -146,7 +159,7 @@ export function InteractionLayer({
           </mesh>
         </group>
       ) : null}
-      {episode && positions ? (
+      {episode && sample ? (
         <group name="trajectory-playback">
           <WidePath
             points={leftPath}
@@ -178,7 +191,7 @@ export function InteractionLayer({
           />
           <ToolMarker
             position={applyRuntimeSpacing(
-              positions.left,
+              sample.left.position,
               "left",
               viewer.spacing,
               baseline,
@@ -187,7 +200,7 @@ export function InteractionLayer({
           />
           <ToolMarker
             position={applyRuntimeSpacing(
-              positions.right,
+              sample.right.position,
               "right",
               viewer.spacing,
               baseline,
