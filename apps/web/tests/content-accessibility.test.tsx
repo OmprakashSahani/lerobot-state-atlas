@@ -92,7 +92,7 @@ afterEach(() => {
   setSpacingMock.mockClear();
   activeManifest = manifest;
   vi.mocked(loadTrajectories).mockResolvedValue(
-    decodeTrajectories(trajectoriesJson),
+    decodeTrajectories(trajectoriesJson, manifest),
   );
   vi.mocked(loadEpisodeVideos).mockResolvedValue(episodeVideos);
 });
@@ -142,7 +142,9 @@ vi.mock("@/components/viewer/ViewerCanvas", () => ({
 vi.mock("@/lib/data/loadBundle", () => ({
   episodeVideoAssetUrl: (filename: string) => `/atlas-data/demo-v1/${filename}`,
   loadEpisodeVideos: vi.fn(async () => episodeVideos),
-  loadTrajectories: vi.fn(async () => decodeTrajectories(trajectoriesJson)),
+  loadTrajectories: vi.fn(async () =>
+    decodeTrajectories(trajectoriesJson, manifest),
+  ),
 }));
 
 describe("accessible product content", () => {

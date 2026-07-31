@@ -51,7 +51,10 @@ export async function loadTrajectories(
     `${BUNDLE_BASE}/${reference.filename}`,
     atlasFetchOptions(environment),
   );
-  return decodeTrajectories(await jsonResponse(response, "trajectory payload"));
+  return decodeTrajectories(
+    await jsonResponse(response, "trajectory payload"),
+    manifest,
+  );
 }
 
 export async function loadEpisodeVideos(

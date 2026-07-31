@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
 import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
-import { decodeTrajectories } from "@/lib/atlas-schema/validate";
+import {
+  decodeManifest,
+  decodeTrajectories,
+} from "@/lib/atlas-schema/validate";
 import {
   advancePlayback,
   episodeVideoTime,
@@ -12,8 +16,10 @@ import {
 } from "@/lib/playback/controller";
 
 describe("trajectory playback", () => {
+  const manifest = decodeManifest(manifestJson);
+
   it("validates synchronized committed trajectories", () => {
-    const episode = decodeTrajectories(trajectoriesJson).episodes[0];
+    const episode = decodeTrajectories(trajectoriesJson, manifest).episodes[0];
     const positions = playbackPositions(episode, 2.9);
     expect(positions.index).toBe(2);
     expect(positions.left).toEqual(episode.leftPositionsXyz[2]);
@@ -38,7 +44,7 @@ describe("trajectory playback", () => {
   });
 
   it("formats first, middle, and final sample status without count ambiguity", () => {
-    const episode = decodeTrajectories(trajectoriesJson).episodes[0];
+    const episode = decodeTrajectories(trajectoriesJson, manifest).episodes[0];
     expect(formatPlaybackStatus(episode, 0)).toBe(
       "Sample 1 of 515 · Frame index 0 · 0.00 / 10.28 s",
     );
@@ -51,7 +57,7 @@ describe("trajectory playback", () => {
   });
 
   it("reports Episode 1's exact 445-sample count", () => {
-    const episode = decodeTrajectories(trajectoriesJson).episodes[1];
+    const episode = decodeTrajectories(trajectoriesJson, manifest).episodes[1];
     expect(formatPlaybackStatus(episode, 444)).toBe(
       "Sample 445 of 445 · Frame index 444 · 8.88 / 8.88 s",
     );
@@ -60,11 +66,13 @@ describe("trajectory playback", () => {
   it("rejects invalid trajectory payloads", () => {
     const invalid = structuredClone(trajectoriesJson);
     invalid.episodes[0].rightPositionsXyz.pop();
-    expect(() => decodeTrajectories(invalid)).toThrow(/arrays are inconsistent/);
+    expect(() => decodeTrajectories(invalid, manifest)).toThrow(
+      /arrays are inconsistent/,
+    );
   });
 
   it("maps trajectory samples into the bounded video interval", () => {
-    const episode = decodeTrajectories(trajectoriesJson).episodes[0];
+    const episode = decodeTrajectories(trajectoriesJson, manifest).episodes[0];
     const source = {
       cameraId: "top",
       filename: "media/top.mp4",
