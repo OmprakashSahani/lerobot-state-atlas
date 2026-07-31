@@ -120,10 +120,10 @@ function trajectoriesWithOptionalState(
               episodes: positionOnlyTrajectories.episodes.map((episode) => ({
                 episodeId: episode.episodeId,
                 leftOrientationsXyzw: episode.frameIndices.map(() => [
+                  episode.episodeId === 0 ? 0 : 1,
                   0,
                   0,
-                  0,
-                  1,
+                  episode.episodeId === 0 ? 1 : 0,
                 ]),
                 rightOrientationsXyzw: episode.frameIndices.map(() => [
                   0,
@@ -342,6 +342,10 @@ describe("accessible product content", () => {
     expect(currentViewerCanvasProps().recordedGripperEpisode?.episodeId).toBe(
       0,
     );
+    expect(
+      currentViewerCanvasProps().orientationEpisode
+        ?.leftOrientationsXyzw[0],
+    ).toEqual([0, 0, 0, 1]);
 
     fireEvent.change(screen.getByLabelText("Episode"), {
       target: { value: "1" },
@@ -351,6 +355,10 @@ describe("accessible product content", () => {
     expect(currentViewerCanvasProps().recordedGripperEpisode?.episodeId).toBe(
       1,
     );
+    expect(
+      currentViewerCanvasProps().orientationEpisode
+        ?.leftOrientationsXyzw[0],
+    ).toEqual([1, 0, 0, 0]);
   });
 
   it.each([

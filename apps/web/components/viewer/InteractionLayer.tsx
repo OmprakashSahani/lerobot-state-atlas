@@ -14,6 +14,7 @@ import type {
 } from "@/lib/atlas-schema/types";
 import { applyRuntimeSpacing } from "@/lib/coordinates/runtimeSpacing";
 import { selectRecordedPlaybackSample } from "@/lib/playback/controller";
+import { EndEffectorMarker } from "./EndEffectorMarker";
 import { useViewerStore } from "./ViewerStore";
 
 function WidePath({
@@ -63,27 +64,6 @@ function WidePath({
     [geometry, material],
   );
   return <primitive object={line} />;
-}
-
-function ToolMarker({
-  position,
-  color,
-}: {
-  position: Vector3;
-  color: string;
-}) {
-  return (
-    <mesh position={position} renderOrder={30}>
-      <sphereGeometry args={[0.014, 18, 12]} />
-      <meshStandardMaterial
-        color={color}
-        depthTest={false}
-        depthWrite={false}
-        emissive={color}
-        emissiveIntensity={0.8}
-      />
-    </mesh>
-  );
 }
 
 export function InteractionLayer({
@@ -189,23 +169,25 @@ export function InteractionLayer({
             opacity={0.96}
             renderOrder={21}
           />
-          <ToolMarker
+          <EndEffectorMarker
+            arm="left"
             position={applyRuntimeSpacing(
               sample.left.position,
               "left",
               viewer.spacing,
               baseline,
             )}
-            color="#5ee4ff"
+            orientationXyzw={sample.left.orientationXyzw}
           />
-          <ToolMarker
+          <EndEffectorMarker
+            arm="right"
             position={applyRuntimeSpacing(
               sample.right.position,
               "right",
               viewer.spacing,
               baseline,
             )}
-            color="#ff6f91"
+            orientationXyzw={sample.right.orientationXyzw}
           />
         </group>
       ) : null}
