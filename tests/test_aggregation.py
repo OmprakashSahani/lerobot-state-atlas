@@ -43,7 +43,7 @@ def test_aggregate_workspace_coverages_processes_bounded_batches(
         yield from batches
 
     monkeypatch.setattr(
-        "lerobot_state_atlas.aggregation.iter_state_batches",
+        "lerobot_state_atlas.aggregation.iter_coverage_state_batches",
         fake_iter_state_batches,
     )
 
@@ -134,7 +134,7 @@ def test_aggregate_workspace_coverages_reports_cumulative_batch_counts(
         ),
     )
     monkeypatch.setattr(
-        "lerobot_state_atlas.aggregation.iter_state_batches",
+        "lerobot_state_atlas.aggregation.iter_coverage_state_batches",
         lambda *args, **kwargs: iter(batches),
     )
 
@@ -236,7 +236,7 @@ def test_aggregate_workspace_coverages_applies_arm_transforms_before_voxelizatio
         yield batch
 
     monkeypatch.setattr(
-        "lerobot_state_atlas.aggregation.iter_state_batches",
+        "lerobot_state_atlas.aggregation.iter_coverage_state_batches",
         fake_iter_state_batches,
     )
 

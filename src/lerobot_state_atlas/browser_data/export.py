@@ -243,24 +243,35 @@ def _trajectory_payload(
     return {"schema": _schema_reference(), "episodes": episodes}
 
 
-def _scene_bounds(coverage_payload: Mapping[str, Any], voxel_size: float) -> dict:
-    centers: list[list[float]] = []
+def _scene_bounds(
+    coverage_payload: Mapping[str, Any],
+    voxel_size: float,
+    voxel_origin_xyz: Sequence[float] = (0.0, 0.0, 0.0),
+) -> dict:
+    minimum_indices: list[int] | None = None
+    maximum_indices: list[int] | None = None
     for arm in coverage_payload["arms"]:
-        centers.extend(
-            [
-                [
-                    index[0] * voxel_size + voxel_size / 2.0,
-                    index[1] * voxel_size + voxel_size / 2.0,
-                    index[2] * voxel_size + voxel_size / 2.0,
-                ]
-                for index in arm["voxelIndices"]
-            ]
-        )
-    if not centers:
+        for index in arm["voxelIndices"]:
+            if minimum_indices is None or maximum_indices is None:
+                minimum_indices = list(index)
+                maximum_indices = list(index)
+                continue
+            for axis in range(3):
+                minimum_indices[axis] = min(minimum_indices[axis], index[axis])
+                maximum_indices[axis] = max(maximum_indices[axis], index[axis])
+
+    if minimum_indices is None or maximum_indices is None:
         raise ValueError("Coverage payload contains no voxel centers.")
+
+    def center(indices: Sequence[int]) -> list[float]:
+        return [
+            voxel_origin_xyz[axis] + indices[axis] * voxel_size + voxel_size / 2.0
+            for axis in range(3)
+        ]
+
     return {
-        "minimumXyz": [min(point[axis] for point in centers) for axis in range(3)],
-        "maximumXyz": [max(point[axis] for point in centers) for axis in range(3)],
+        "minimumXyz": center(minimum_indices),
+        "maximumXyz": center(maximum_indices),
     }
 
 

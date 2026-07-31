@@ -9,7 +9,7 @@ from lerobot_state_atlas.export_measurement import (
     ArmCoverageCounts,
     ExportMeasurementSession,
 )
-from lerobot_state_atlas.state import iter_state_batches
+from lerobot_state_atlas.state import iter_coverage_state_batches
 from lerobot_state_atlas.trajectory import (
     build_trlc_dk1_joint_component_map,
     compute_tool_trajectory,
@@ -85,13 +85,13 @@ def aggregate_workspace_coverages(
     num_frames = 0
 
     batch_iterator = (
-        iter_state_batches(
+        iter_coverage_state_batches(
             repo_id,
             normalized_episodes,
             episode_batch_size=episode_batch_size,
         )
         if revision is None
-        else iter_state_batches(
+        else iter_coverage_state_batches(
             repo_id,
             normalized_episodes,
             episode_batch_size=episode_batch_size,

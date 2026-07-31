@@ -12,6 +12,7 @@ import torch
 from lerobot_state_atlas.browser_data.export import (
     SourceProvenance,
     _git_source_provenance,
+    _scene_bounds,
     _trajectory_payload,
     _write_bundle,
     build_browser_data_documents,
@@ -159,6 +160,27 @@ def make_documents() -> tuple[dict, bytes, bytes]:
     return manifest, coverage, trajectory
 
 
+def reference_scene_bounds(
+    coverage_payload: dict,
+    voxel_size: float,
+    voxel_origin_xyz: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> dict:
+    centers = [
+        [
+            voxel_origin_xyz[axis] + index[axis] * voxel_size + voxel_size / 2.0
+            for axis in range(3)
+        ]
+        for arm in coverage_payload["arms"]
+        for index in arm["voxelIndices"]
+    ]
+    if not centers:
+        raise ValueError("Coverage payload contains no voxel centers.")
+    return {
+        "minimumXyz": [min(point[axis] for point in centers) for axis in range(3)],
+        "maximumXyz": [max(point[axis] for point in centers) for axis in range(3)],
+    }
+
+
 def write_documents(
     path: Path,
     manifest: dict,
@@ -256,6 +278,92 @@ def test_deterministic_serialization_and_manifest_generation() -> None:
     assert first[0]["exporter"]["repositoryHeadCommit"] == "b" * 40
     assert first[0]["exporter"]["workingTreeDirty"] is True
     assert "uncommitted" in first[0]["exporter"]["sourceDescription"]
+
+
+@pytest.mark.parametrize(
+    ("arms", "origin"),
+    [
+        ([{"voxelIndices": [[2, 3, 4]]}], (0.0, 0.0, 0.0)),
+        (
+            [
+                {"voxelIndices": [[0, 1, 2], [4, 5, 6]]},
+                {"voxelIndices": [[-2, 8, 1], [7, -3, 9]]},
+            ],
+            (0.0, 0.0, 0.0),
+        ),
+        (
+            [{"voxelIndices": [[-9, 3, -1], [5, -7, 11]]}],
+            (0.0, 0.0, 0.0),
+        ),
+        (
+            [{"voxelIndices": [[-2, 0, 4], [3, 7, -5]]}],
+            (1.25, -0.75, 2.5),
+        ),
+        (
+            [
+                {"voxelIndices": [[0, 0, 0]]},
+                {
+                    "voxelIndices": [
+                        [-12, 4, 1],
+                        [3, 20, -8],
+                        [9, -6, 14],
+                    ]
+                },
+            ],
+            (0.4, -1.2, 0.05),
+        ),
+    ],
+    ids=[
+        "one-arm",
+        "two-arms",
+        "negative-and-positive-indices",
+        "non-zero-origin",
+        "asymmetric-arms",
+    ],
+)
+def test_scene_bounds_match_reference_algorithm(
+    arms: list[dict],
+    origin: tuple[float, float, float],
+) -> None:
+    payload = {"arms": arms}
+
+    assert _scene_bounds(payload, 0.02, origin) == reference_scene_bounds(
+        payload,
+        0.02,
+        origin,
+    )
+
+
+def test_browser_documents_remain_identical_to_reference_scene_bounds(
+    monkeypatch,
+) -> None:
+    optimized = make_documents()
+    monkeypatch.setattr(
+        "lerobot_state_atlas.browser_data.export._scene_bounds",
+        reference_scene_bounds,
+    )
+    reference = make_documents()
+
+    assert deterministic_json_bytes(optimized[0]) == deterministic_json_bytes(
+        reference[0]
+    )
+    assert optimized[1:] == reference[1:]
+
+
+@pytest.mark.parametrize("bundle_name", ["demo-v1", "demo-v2"])
+def test_scene_bounds_match_immutable_public_bundles(bundle_name: str) -> None:
+    bundle = Path(__file__).parents[1] / "apps/web/public/atlas-data" / bundle_name
+    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    coverage = json.loads((bundle / "coverage.json").read_text(encoding="utf-8"))
+
+    assert (
+        _scene_bounds(
+            coverage,
+            manifest["coverage"]["voxelSize"],
+            manifest["coverage"]["voxelOrigin"],
+        )
+        == manifest["sceneBounds"]
+    )
 
 
 def test_measurement_reporting_does_not_change_bundle_bytes_or_checksums(
