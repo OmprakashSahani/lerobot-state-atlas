@@ -226,6 +226,87 @@ For each browser and build mode, manually record:
 - keyboard navigation, accessible names, and screen-reader behavior for the
   complete ranking.
 
+### Measured 100-episode browser evidence
+
+The browser gate was measured on 2026-07-31 with Chrome 150.0.0.0 on Windows
+10 x64. The viewer used the local Next.js development server with DevTools
+open, bundle base `/atlas-data/__local-benchmark__`, and bundle ID
+`pilot-100-batch32`. The bundle contained 100 coverage episodes, 5,154
+arm-specific entries, and 17,831 CSR incidences. The complete 100-episode
+ranking was rendered.
+
+#### Automated benchmark
+
+| Operation | Duration | Result size |
+| --- | ---: | ---: |
+| Manifest load, JSON parse, and validation | 62.2 ms | — |
+| Coverage load, JSON parse, and validation | 48.2 ms | — |
+| Coverage preparation | 3.1 ms | 5,154 arm-specific entries |
+| Global uncommon scoring | 9.5 ms | 100 ranked episodes |
+
+| Radius | Matched entries | Ranked episodes | Radius query | Local uncommon scoring |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 m | 1 | 1 | 1.7 ms | 4.0 ms |
+| 0.05 m | 19 | 5 | 4.1 ms | 3.1 ms |
+| 0.30 m | 2,363 | 100 | 1.8 ms | 7.8 ms |
+
+These are local development-mode timings for the existing CPU operations. They
+do not represent production delivery or network-user performance.
+
+#### Manual browser observations
+
+| Observation | Snapshot |
+| --- | ---: |
+| Idle frame rate | 60.0 FPS |
+| Continuous-orbit frame rate | approximately 55.2 FPS |
+| GPU raster | On |
+| GPU memory used | approximately 6.1 MB |
+| JavaScript heap | approximately 20.1 MB |
+| Idle CPU | approximately 16.3% |
+| Performance Monitor DOM nodes | 3,847 |
+| Later `document.querySelectorAll("*")` count | 1,836 |
+
+The two DOM-node counts came from different DevTools and runtime snapshots and
+must not be compared as if they were identical measurements. The heap and DOM
+graphs appeared stable during the observed idle interval. Idle and continuous
+orbit rendering were visually responsive in this development-mode observation.
+
+Five approximate measurements from metric switch until two animation frames
+had completed were:
+
+| Switch | Duration |
+| --- | ---: |
+| Visits → episodes | 374.5 ms |
+| Episodes → visits | 314.1 ms |
+| Visits → episodes | 297.0 ms |
+| Episodes → visits | 328.1 ms |
+| Visits → episodes | 336.9 ms |
+| **Average** | **330.1 ms** |
+| **Median** | **328.1 ms** |
+| **Range** | **297.0–374.5 ms** |
+
+The measured automated CPU operations were small relative to the approximately
+330 ms metric-switch-to-paint observation. This record does not diagnose that
+delay; doing so requires a proper browser Performance trace.
+
+The ranking was found with the accessible label
+`Uncommon-space episode ranking for entire coverage`. It contained 100 list
+items. Its `scrollHeight` and `clientHeight` were both 14,554 px, demonstrating
+that all 100 items were laid out and the ranking was not virtualized. The full
+DOM ranking is acceptable at 100 episodes, but remains a concrete scaling risk
+for 1,344 episodes.
+
+An accidental `requestAnimation is not defined` console error during the
+session came from a manually mistyped measurement snippet, not application
+code.
+
+The 100-episode pilot successfully loads, prepares, scores, queries, ranks, and
+renders, so the 100-episode browser gate is **passed**. These observations do
+not establish linear full-dataset scaling. DevTools, development mode, HMR,
+hardware, viewport size, and Three.js continuous rendering all affect the
+reported values. The automated probe also does not measure GPU frame rate or
+the complete network-user experience.
+
 - Retain episode batch size 32.
 - Preserve exact CSR episode identities and separate arm-specific entries.
 - Keep the small trajectory selection independent from coverage selection.
@@ -233,7 +314,10 @@ For each browser and build mode, manually record:
 - Coverage min/max preparation no longer spreads payload-sized arrays into
   function arguments, and visible episode labeling now derives from the
   manifest selection.
-- Measure browser behavior next before adding a public immutable pilot bundle;
-  no frontend performance claim is established by this hardening alone.
-- Keep 250-, 500-, and 1,344-episode exports gated on measured exporter and
-  browser behavior.
+- Introduce a dedicated Episode Analysis panel for scoring scope and ranking in
+  the next implementation commit; this measurement does not implement it.
+- Measure the revised layout again with 100 episodes.
+- If that evidence remains acceptable, make a measured 250-episode export and
+  local browser run the next dataset gate.
+- Preserve staged growth: measure 250 episodes, then 500 episodes, then the full
+  1,344 episodes only while exporter and browser evidence remains acceptable.
