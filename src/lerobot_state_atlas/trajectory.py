@@ -18,6 +18,8 @@ class ToolTrajectory:
 
     Rotation matrices have shape ``(num_frames, 3, 3)`` and express the
     tool-link orientation in the same coordinate frame as ``positions``.
+    Optional recorded gripper values are authoritative raw dataset scalars
+    with device-specific semantics, not calibrated gripper geometry.
     """
 
     arm: str
@@ -25,6 +27,7 @@ class ToolTrajectory:
     positions: Tensor
     rotation_matrices: Tensor
     episode_indices: Tensor | None = None
+    recorded_gripper_values: Tensor | None = None
 
     def __post_init__(self) -> None:
         if self.positions.ndim != 2 or self.positions.shape[1] != 3:
@@ -49,6 +52,28 @@ class ToolTrajectory:
                 "Trajectory episode index count must match the number of frames."
             )
 
+        if self.recorded_gripper_values is not None:
+            gripper_values = (
+                self.recorded_gripper_values.detach()
+                .to(device="cpu", dtype=torch.float64)
+                .clone()
+            )
+            if gripper_values.ndim != 1:
+                raise ValueError("Recorded gripper values must be one-dimensional.")
+            if gripper_values.shape[0] != self.positions.shape[0]:
+                raise ValueError(
+                    "Recorded gripper value count must match the number of frames."
+                )
+            if not torch.isfinite(gripper_values).all().item():
+                raise ValueError(
+                    "Recorded gripper values must contain only finite values."
+                )
+            object.__setattr__(
+                self,
+                "recorded_gripper_values",
+                gripper_values,
+            )
+
     @property
     def num_frames(self) -> int:
         """Return the number of trajectory frames."""
@@ -71,6 +96,14 @@ def build_trlc_dk1_joint_component_map(
         raise ValueError("Arm must be either 'left' or 'right'.")
 
     return {f"joint{index}": f"{arm}_joint_{index}.pos" for index in range(1, 7)}
+
+
+def build_trlc_dk1_gripper_component_name(arm: str) -> str:
+    """Return the raw recorded TRLC-DK1 gripper state component name."""
+    if arm not in {"left", "right"}:
+        raise ValueError("Arm must be either 'left' or 'right'.")
+
+    return f"{arm}_gripper.pos"
 
 
 def _origin_transform(joint: JointDefinition) -> Tensor:
@@ -295,8 +328,9 @@ def compute_tool_trajectory(
     link_name: str = "tool0",
     chunk_size: int = _DEFAULT_CHUNK_SIZE,
     episode_indices: Tensor | None = None,
+    gripper_component_name: str | None = None,
 ) -> ToolTrajectory:
-    """Convert batched joint states into three-dimensional tool positions."""
+    """Compute tool poses and optionally preserve authoritative raw recorded gripper values."""
     if states.ndim != 2:
         raise ValueError("States must have shape (num_frames, state_dimension).")
 
@@ -368,6 +402,14 @@ def compute_tool_trajectory(
 
     component_indices = {name: index for index, name in enumerate(names)}
 
+    if gripper_component_name is not None:
+        if not gripper_component_name:
+            raise ValueError("Gripper component name must not be empty.")
+        if gripper_component_name not in component_indices:
+            raise ValueError(
+                f"Missing gripper state component: {gripper_component_name}"
+            )
+
     missing_components = tuple(
         joint_component_map[joint.name]
         for joint in movable_joints
@@ -385,6 +427,11 @@ def compute_tool_trajectory(
     if not torch.isfinite(state_values).all().item():
         raise ValueError("States must contain only finite values.")
 
+    recorded_gripper_values = (
+        None
+        if gripper_component_name is None
+        else state_values[:, component_indices[gripper_component_name]].clone()
+    )
     position_chunks: list[Tensor] = []
     rotation_chunks: list[Tensor] = []
 
@@ -405,4 +452,5 @@ def compute_tool_trajectory(
         positions=torch.cat(position_chunks, dim=0),
         rotation_matrices=torch.cat(rotation_chunks, dim=0),
         episode_indices=normalized_episode_indices,
+        recorded_gripper_values=recorded_gripper_values,
     )

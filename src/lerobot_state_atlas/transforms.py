@@ -120,6 +120,13 @@ def transform_tool_trajectory(
         if trajectory.episode_indices is None
         else trajectory.episode_indices.detach().to(device="cpu").clone()
     )
+    recorded_gripper_values = (
+        None
+        if trajectory.recorded_gripper_values is None
+        else trajectory.recorded_gripper_values.detach()
+        .to(device="cpu", dtype=torch.float64)
+        .clone()
+    )
 
     return ToolTrajectory(
         arm=trajectory.arm,
@@ -127,4 +134,5 @@ def transform_tool_trajectory(
         positions=transformed_positions,
         rotation_matrices=transformed_rotations,
         episode_indices=episode_indices,
+        recorded_gripper_values=recorded_gripper_values,
     )

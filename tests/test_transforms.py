@@ -13,6 +13,7 @@ from lerobot_state_atlas.transforms import (
 def make_trajectory(
     positions: torch.Tensor,
     rotation_matrices: torch.Tensor | None = None,
+    recorded_gripper_values: torch.Tensor | None = None,
 ) -> ToolTrajectory:
     return ToolTrajectory(
         arm="left",
@@ -27,6 +28,7 @@ def make_trajectory(
             [4, 7],
             dtype=torch.int64,
         ),
+        recorded_gripper_values=recorded_gripper_values,
     )
 
 
@@ -140,6 +142,44 @@ def test_base_rotation_left_composes_noncommuting_tool_rotation() -> None:
     assert transformed.rotation_matrices.dtype == torch.float64
     torch.testing.assert_close(trajectory.positions, original_positions)
     torch.testing.assert_close(trajectory.rotation_matrices, original_rotations)
+
+
+@pytest.mark.parametrize(
+    "transform",
+    (
+        RigidTransform(),
+        RigidTransform(translation_xyz=(0.5, -1.0, 2.0)),
+        RigidTransform(rotation_rpy=(0.2, -0.4, 0.7)),
+    ),
+)
+def test_transform_preserves_raw_recorded_gripper_values(
+    transform: RigidTransform,
+) -> None:
+    recorded_values = torch.tensor([-2.5, 4.25], dtype=torch.float32)
+    trajectory = make_trajectory(
+        torch.zeros((2, 3), dtype=torch.float64),
+        recorded_gripper_values=recorded_values,
+    )
+    source_values = trajectory.recorded_gripper_values.clone()
+
+    transformed = transform_tool_trajectory(trajectory, transform)
+
+    torch.testing.assert_close(
+        transformed.recorded_gripper_values,
+        torch.tensor([-2.5, 4.25], dtype=torch.float64),
+    )
+    assert transformed.recorded_gripper_values is not trajectory.recorded_gripper_values
+    assert transformed.recorded_gripper_values.device.type == "cpu"
+    assert transformed.recorded_gripper_values.dtype == torch.float64
+    torch.testing.assert_close(trajectory.recorded_gripper_values, source_values)
+
+
+def test_transform_preserves_absent_recorded_gripper_values() -> None:
+    trajectory = make_trajectory(torch.zeros((2, 3), dtype=torch.float64))
+
+    transformed = transform_tool_trajectory(trajectory, RigidTransform())
+
+    assert transformed.recorded_gripper_values is None
 
 
 @pytest.mark.parametrize(
