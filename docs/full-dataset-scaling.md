@@ -175,6 +175,57 @@ cmp /tmp/lerobot-state-atlas-pilot-100-optimized/manifest.json \
 
 ## Decision and next gate
 
+### Local browser measurement
+
+Stage the existing optimized pilot into the ignored development-only bundle
+path. This replaces only `__local-benchmark__`; it does not modify either
+immutable demo:
+
+```sh
+cd apps/web
+npm run benchmark:stage -- /tmp/lerobot-state-atlas-pilot-100-optimized
+```
+
+Run the local viewer with the staged bundle and opt-in timing probe:
+
+```sh
+NEXT_PUBLIC_ATLAS_BUNDLE_BASE=/atlas-data/__local-benchmark__ \
+NEXT_PUBLIC_ATLAS_ENABLE_BENCHMARKS=1 \
+npm run dev
+```
+
+For a local production-build measurement, use:
+
+```sh
+NEXT_PUBLIC_ATLAS_BUNDLE_BASE=/atlas-data/__local-benchmark__ \
+NEXT_PUBLIC_ATLAS_ENABLE_BENCHMARKS=1 \
+npm run build
+```
+
+The default remains `/atlas-data/demo-v2` when the bundle-base override is
+absent. After the viewer finishes loading, inspect the structured report in
+browser developer tools:
+
+```js
+window.__LEROBOT_STATE_ATLAS_BENCHMARK__
+```
+
+The automated report times manifest fetch/parse/validation, coverage
+fetch/parse/validation, coverage preparation, global uncommon scoring, and
+radius query plus local scoring at 0, 0.05, and 0.30 metres. It does not load
+trajectories or video. It also does not measure GPU frame rate or the complete
+network-user experience.
+
+For each browser and build mode, manually record:
+
+- decoded JavaScript heap after coverage preparation;
+- Three.js instance upload cost;
+- normal orbit frame rate after the scene settles;
+- metric-switch latency;
+- complete ranking DOM and layout behavior; and
+- keyboard navigation, accessible names, and screen-reader behavior for the
+  complete ranking.
+
 - Retain episode batch size 32.
 - Preserve exact CSR episode identities and separate arm-specific entries.
 - Keep the small trajectory selection independent from coverage selection.

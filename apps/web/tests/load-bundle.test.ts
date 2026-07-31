@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
 import coverageJson from "@/public/atlas-data/demo-v2/coverage.json";
@@ -6,8 +6,10 @@ import trajectoriesJson from "@/public/atlas-data/demo-v2/trajectories.json";
 import { decodeManifest } from "@/lib/atlas-schema/validate";
 import {
   loadDemoBundle,
+  loadDemoBundleForBenchmark,
   loadEpisodeVideos,
   loadTrajectories,
+  resolveBundleBase,
 } from "@/lib/data/loadBundle";
 
 const episodeVideosJson = {
@@ -62,6 +64,63 @@ function manifestWithEpisodeVideos() {
 }
 
 describe("bundle loading", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses demo-v2 by default and validates local bundle overrides", () => {
+    expect(resolveBundleBase(undefined)).toBe("/atlas-data/demo-v2");
+    expect(resolveBundleBase("/atlas-data/__local-benchmark__")).toBe(
+      "/atlas-data/__local-benchmark__",
+    );
+    expect(resolveBundleBase("/atlas-data/__local-benchmark__/")).toBe(
+      "/atlas-data/__local-benchmark__",
+    );
+  });
+
+  it.each([
+    "",
+    "https://example.com/atlas-data/pilot",
+    "//example.com/atlas-data/pilot",
+    "/tmp/pilot",
+    "/atlas-data/../demo-v2",
+    "/atlas-data/pilot\\bundle",
+    "/atlas-data/pilot?version=1",
+    "/atlas-data/pilot#fragment",
+  ])("rejects unsafe bundle override %j", (override) => {
+    expect(() => resolveBundleBase(override)).toThrow(
+      /safe root-relative \/atlas-data\/ path/,
+    );
+  });
+
+  it("applies one override to initial and lazy payload requests", async () => {
+    vi.stubEnv(
+      "NEXT_PUBLIC_ATLAS_BUNDLE_BASE",
+      "/atlas-data/__local-benchmark__/",
+    );
+    const urls: string[] = [];
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      urls.push(url);
+      const payload = url.endsWith("manifest.json")
+        ? manifestJson
+        : url.endsWith("coverage.json")
+          ? coverageJson
+          : trajectoriesJson;
+      return new Response(JSON.stringify(payload), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const bundle = await loadDemoBundle(fetcher, "development");
+    await loadTrajectories(bundle.manifest, fetcher, "development");
+
+    expect(urls).toEqual([
+      "/atlas-data/__local-benchmark__/manifest.json",
+      "/atlas-data/__local-benchmark__/coverage.json",
+      "/atlas-data/__local-benchmark__/trajectories.json",
+    ]);
+    expect(urls.some((url) => url.includes("episode-videos"))).toBe(false);
+  });
+
   it("loads development manifest and coverage with no-store", async () => {
     const urls: string[] = [];
     const options: Array<RequestInit | undefined> = [];
@@ -88,6 +147,30 @@ describe("bundle loading", () => {
     expect(options).toEqual([{ cache: "no-store" }, { cache: "no-store" }]);
     expect(urls.some((url) => url.includes("trajectories"))).toBe(false);
     expect(urls.some((url) => url.includes("episode-videos"))).toBe(false);
+  });
+
+  it("measures the existing manifest, coverage, and preparation boundaries", async () => {
+    const times = [0, 5, 10, 17, 20, 29];
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      return new Response(
+        JSON.stringify(url.endsWith("manifest.json") ? manifestJson : coverageJson),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await loadDemoBundleForBenchmark(
+      fetcher,
+      "development",
+      () => times.shift()!,
+    );
+
+    expect(result.data.preparedArms).toHaveLength(2);
+    expect(result.durations).toEqual({
+      manifestLoadMilliseconds: 5,
+      coverageLoadMilliseconds: 7,
+      coveragePreparationMilliseconds: 9,
+    });
   });
 
   it("does not disable browser caching for production bundle requests", async () => {
