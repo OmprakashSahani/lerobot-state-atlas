@@ -280,6 +280,7 @@ describe("accessible product content", () => {
 
   it("labels viewer controls and preserves the spacing disclosure", () => {
     render(<AtlasViewer />);
+    expect(screen.getByText("demo-v2 / episodes 0–9")).toBeVisible();
     expect(screen.getByText("schema v1.2")).toBeVisible();
     expect(
       screen.getByRole("complementary", {
@@ -322,6 +323,26 @@ describe("accessible product content", () => {
     expect(
       screen.queryByText(manifest.exporter.sourceDescription),
     ).not.toBeInTheDocument();
+  });
+
+  it("derives stable bundle and episode labeling from coverage metadata", async () => {
+    activeManifest = {
+      ...manifest,
+      bundleId: "pilot-selection",
+    };
+    activeSelection = null;
+    const { rerender } = render(<AtlasViewer />);
+    const expectedLabel = "pilot-selection / episodes 0–9";
+
+    expect(screen.getByText(expectedLabel)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+    expect(screen.getByText(expectedLabel)).toBeVisible();
+
+    activeRadius = 0.3;
+    activeSpacing = 1.2;
+    rerender(<AtlasViewer />);
+    expect(screen.getByText(expectedLabel)).toBeVisible();
   });
 
   it("presents an accessible global uncommon-space ranking by default", () => {

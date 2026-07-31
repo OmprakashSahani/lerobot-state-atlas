@@ -179,9 +179,10 @@ cmp /tmp/lerobot-state-atlas-pilot-100-optimized/manifest.json \
 - Preserve exact CSR episode identities and separate arm-specific entries.
 - Keep the small trajectory selection independent from coverage selection.
 - Do not deploy the 100-episode pilot yet.
-- Make frontend large-array hardening and dynamic episode-range labeling the
-  next implementation commit.
-- After frontend hardening, measure browser behavior before adding a public
-  immutable pilot bundle.
+- Coverage min/max preparation no longer spreads payload-sized arrays into
+  function arguments, and visible episode labeling now derives from the
+  manifest selection.
+- Measure browser behavior next before adding a public immutable pilot bundle;
+  no frontend performance claim is established by this hardening alone.
 - Keep 250-, 500-, and 1,344-episode exports gated on measured exporter and
   browser behavior.

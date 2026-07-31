@@ -17,11 +17,22 @@ export function voxelCenter(
   ];
 }
 
+export function numericExtent(values: ArrayLike<number>): [number, number] {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < values.length; index += 1) {
+    minimum = Math.min(minimum, values[index]);
+    maximum = Math.max(maximum, values[index]);
+  }
+  return [minimum, maximum];
+}
+
 export function prepareCoverage(
   manifest: AtlasManifest,
   coverage: CoveragePayload,
 ): PreparedVoxelArm[] {
   return coverage.arms.map((arm) => {
+    const [minimumVisitCount, maximumVisitCount] = numericExtent(arm.visitCounts);
     const centers = new Float32Array(arm.voxelIndices.length * 3);
     const visits = Uint32Array.from(arm.visitCounts);
     const episodeCounts = Uint32Array.from(
@@ -44,8 +55,8 @@ export function prepareCoverage(
       visits,
       episodeCounts,
       instanceLookup,
-      minimumVisitCount: Math.min(...arm.visitCounts),
-      maximumVisitCount: Math.max(...arm.visitCounts),
+      minimumVisitCount,
+      maximumVisitCount,
     };
   });
 }

@@ -13,6 +13,7 @@ import {
   loadEpisodeVideos,
   loadTrajectories,
 } from "@/lib/data/loadBundle";
+import { formatEpisodeSelection } from "@/lib/data/episodeSelection";
 import {
   queryRadius,
   type VoxelSelection,
@@ -514,6 +515,10 @@ export function AtlasViewer() {
         selectedCoverage.episodeIdOffsets[viewer.selection.voxelEntryIndex]
       : 0;
   const frameIndex = recordedSample?.index ?? 0;
+  const episodeSelectionLabel = formatEpisodeSelection(
+    manifest.dataset.episodeIds,
+    manifest.dataset.episodeCount,
+  );
 
   const commitSpacingInput = () => {
     const input = spacingInputRef.current;
@@ -617,7 +622,7 @@ export function AtlasViewer() {
       </div>
       <aside className="viewer-panel" aria-label="Viewer controls and metadata">
         <div className="panel-heading">
-          <div><p className="eyebrow">Demo / episodes 0–9</p><h1>Workspace coverage</h1></div>
+          <div><p className="eyebrow">{manifest.bundleId} / {episodeSelectionLabel}</p><h1>Workspace coverage</h1></div>
           <span className="schema-chip">
             schema v{manifest.schema.major}.{manifest.schema.minor}
           </span>
