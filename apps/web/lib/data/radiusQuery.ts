@@ -4,6 +4,7 @@ import type {
   Vector3,
 } from "@/lib/atlas-schema/types";
 import { applyRuntimeSpacing } from "@/lib/coordinates/runtimeSpacing";
+import type { CoverageEntryReference } from "@/lib/data/uncommonEpisodes";
 
 export interface VoxelSelection {
   arm: "left" | "right";
@@ -20,7 +21,7 @@ export interface RadiusQueryResult {
   leftVisits: number;
   rightVisits: number;
   distinctEpisodeCount: number;
-  matches: { arm: "left" | "right"; voxelEntryIndex: number }[];
+  matches: CoverageEntryReference[];
 }
 
 export function queryRadius(
