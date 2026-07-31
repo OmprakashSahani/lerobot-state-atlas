@@ -109,6 +109,11 @@ def transform_tool_trajectory(
         dtype=torch.float64,
     )
     transformed_positions = values @ rotation.T + translation
+    local_rotations = trajectory.rotation_matrices.detach().to(
+        device="cpu",
+        dtype=torch.float64,
+    )
+    transformed_rotations = rotation @ local_rotations
 
     episode_indices = (
         None
@@ -120,5 +125,6 @@ def transform_tool_trajectory(
         arm=trajectory.arm,
         link_name=trajectory.link_name,
         positions=transformed_positions,
+        rotation_matrices=transformed_rotations,
         episode_indices=episode_indices,
     )

@@ -13,12 +13,47 @@ _DEFAULT_CHUNK_SIZE = 65_536
 
 @dataclass(frozen=True)
 class ToolTrajectory:
-    """Three-dimensional tool positions computed from robot states."""
+    """Tool poses computed from robot states.
+
+    Rotation matrices have shape ``(num_frames, 3, 3)`` and express the
+    tool-link orientation in the same coordinate frame as ``positions``.
+    """
 
     arm: str
     link_name: str
     positions: Tensor
+    rotation_matrices: Tensor
     episode_indices: Tensor | None = None
+
+    def __post_init__(self) -> None:
+        if self.positions.ndim != 2 or self.positions.shape[1] != 3:
+            raise ValueError("Trajectory positions must have shape (num_frames, 3).")
+
+        if self.rotation_matrices.ndim != 3 or self.rotation_matrices.shape[1:] != (
+            3,
+            3,
+        ):
+            raise ValueError(
+                "Trajectory rotation matrices must have shape (num_frames, 3, 3)."
+            )
+
+        if self.rotation_matrices.shape[0] != self.positions.shape[0]:
+            raise ValueError(
+                "Trajectory position and rotation frame counts must match."
+            )
+
+        if not torch.isfinite(self.rotation_matrices).all().item():
+            raise ValueError(
+                "Trajectory rotation matrices must contain only finite values."
+            )
+
+        if (
+            self.episode_indices is not None
+            and self.episode_indices.shape[0] != self.positions.shape[0]
+        ):
+            raise ValueError(
+                "Trajectory episode index count must match the number of frames."
+            )
 
     @property
     def num_frames(self) -> int:
@@ -216,12 +251,12 @@ def _find_joint_chain(
     return tuple(chain)
 
 
-def _compute_chunk_positions(
+def _compute_chunk_poses(
     state_values: Tensor,
     chain: Sequence[JointDefinition],
     component_indices: Mapping[str, int],
     joint_component_map: Mapping[str, str],
-) -> Tensor:
+) -> tuple[Tensor, Tensor]:
     num_frames = int(state_values.shape[0])
 
     transform = (
@@ -250,7 +285,10 @@ def _compute_chunk_positions(
             joint_positions,
         )
 
-    return transform[:, :3, 3].clone()
+    return (
+        transform[:, :3, 3].clone(),
+        transform[:, :3, :3].clone(),
+    )
 
 
 def compute_tool_trajectory(
@@ -350,22 +388,27 @@ def compute_tool_trajectory(
         device="cpu",
         dtype=torch.float64,
     )
+    if not torch.isfinite(state_values).all().item():
+        raise ValueError("States must contain only finite values.")
+
     position_chunks: list[Tensor] = []
+    rotation_chunks: list[Tensor] = []
 
     for start in range(0, num_frames, chunk_size):
         stop = min(start + chunk_size, num_frames)
-        position_chunks.append(
-            _compute_chunk_positions(
-                state_values[start:stop],
-                chain,
-                component_indices,
-                joint_component_map,
-            )
+        positions, rotation_matrices = _compute_chunk_poses(
+            state_values[start:stop],
+            chain,
+            component_indices,
+            joint_component_map,
         )
+        position_chunks.append(positions)
+        rotation_chunks.append(rotation_matrices)
 
     return ToolTrajectory(
         arm=arm,
         link_name=link_name,
         positions=torch.cat(position_chunks, dim=0),
+        rotation_matrices=torch.cat(rotation_chunks, dim=0),
         episode_indices=normalized_episode_indices,
     )

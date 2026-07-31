@@ -80,6 +80,9 @@ def test_aggregate_workspace_coverages_processes_bounded_batches(
             arm=arm,
             link_name="tool0",
             positions=positions,
+            rotation_matrices=torch.eye(3, dtype=torch.float64)
+            .expand(positions.shape[0], -1, -1)
+            .clone(),
             episode_indices=episode_indices,
         )
 
@@ -189,6 +192,9 @@ def test_aggregate_workspace_coverages_applies_arm_transforms_before_voxelizatio
             arm=arm,
             link_name="tool0",
             positions=positions,
+            rotation_matrices=torch.eye(3, dtype=torch.float64)
+            .expand(positions.shape[0], -1, -1)
+            .clone(),
             episode_indices=episode_indices,
         )
 

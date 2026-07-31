@@ -18,6 +18,9 @@ def make_trajectory(
         arm=arm,
         link_name=link_name,
         positions=positions,
+        rotation_matrices=torch.eye(3, dtype=torch.float64)
+        .expand(positions.shape[0], -1, -1)
+        .clone(),
     )
 
 
@@ -410,6 +413,7 @@ def test_compute_workspace_coverage_counts_distinct_episodes_per_voxel() -> None
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(5, -1, -1).clone(),
         episode_indices=torch.tensor(
             [0, 0, 1, 1, 1],
             dtype=torch.int64,
@@ -453,6 +457,7 @@ def test_workspace_coverage_accumulator_counts_episodes_across_batches() -> None
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(3, -1, -1).clone(),
         episode_indices=torch.tensor(
             [0, 0, 1],
             dtype=torch.int64,
@@ -468,6 +473,7 @@ def test_workspace_coverage_accumulator_counts_episodes_across_batches() -> None
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(2, -1, -1).clone(),
         episode_indices=torch.tensor(
             [2, 2],
             dtype=torch.int64,

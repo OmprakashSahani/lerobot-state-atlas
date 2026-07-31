@@ -356,6 +356,9 @@ def test_visualize_workspace_command(
         return ToolTrajectory(
             arm=arm,
             link_name="tool0",
+            rotation_matrices=torch.eye(3, dtype=torch.float64)
+            .expand(3, -1, -1)
+            .clone(),
             positions=torch.tensor(
                 [
                     [offset, 0.0, 0.0],
@@ -675,6 +678,9 @@ def test_visualize_workspace_accepts_multiple_episodes(
         return ToolTrajectory(
             arm=arm,
             link_name="tool0",
+            rotation_matrices=torch.eye(3, dtype=torch.float64)
+            .expand(4, -1, -1)
+            .clone(),
             positions=torch.tensor(
                 [
                     [offset, 0.0, 0.0],
@@ -867,6 +873,9 @@ def test_interactive_workspace_command(
         return ToolTrajectory(
             arm=arm,
             link_name="tool0",
+            rotation_matrices=torch.eye(3, dtype=torch.float64)
+            .expand(4, -1, -1)
+            .clone(),
             positions=torch.tensor(
                 [
                     [offset, 0.0, 0.0],
