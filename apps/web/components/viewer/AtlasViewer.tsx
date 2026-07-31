@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
+  CoveragePayload,
   EpisodeVideoPayload,
   TrajectoryPayload,
 } from "@/lib/atlas-schema/types";
@@ -12,7 +13,11 @@ import {
   loadEpisodeVideos,
   loadTrajectories,
 } from "@/lib/data/loadBundle";
-import { queryRadius } from "@/lib/data/radiusQuery";
+import {
+  queryRadius,
+  type VoxelSelection,
+} from "@/lib/data/radiusQuery";
+import { scoreUncommonEpisodes } from "@/lib/data/uncommonEpisodes";
 import {
   advancePlayback,
   episodeVideoTime,
@@ -48,6 +53,147 @@ const MAX_ARM_SPACING = 1.4;
 
 function formatMetric(value: number, metric: CoverageMetric) {
   return metric === "log-visits" ? value.toFixed(2) : value.toLocaleString();
+}
+
+function UncommonEpisodesSection({
+  coverage,
+  episodeCount,
+  episodeIds,
+  radiusResult,
+  selection,
+}: {
+  coverage: CoveragePayload;
+  episodeCount: number;
+  episodeIds: readonly number[];
+  radiusResult: ReturnType<typeof queryRadius> | null;
+  selection: VoxelSelection | null;
+}) {
+  const [radiusScopeSelection, setRadiusScopeSelection] =
+    useState<VoxelSelection | null>(null);
+  const usesRadiusScope =
+    selection !== null && radiusScopeSelection === selection;
+
+  const radiusMatches = radiusResult?.matches ?? [];
+  const radiusScopeKey = radiusMatches
+    .map((match) => `${match.arm}:${match.voxelEntryIndex}`)
+    .join("|");
+  const scores = useMemo(
+    () =>
+      scoreUncommonEpisodes({
+        coverage,
+        episodeCount,
+        allowedEpisodeIds: episodeIds,
+        scope:
+          usesRadiusScope ? radiusMatches : undefined,
+      }),
+    // Entry identities fully determine local scores; geometry-only query changes
+    // with the same matches must not repeat the CSR traversal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      coverage,
+      episodeCount,
+      episodeIds,
+      radiusScopeKey,
+      usesRadiusScope,
+    ],
+  );
+  const scopeLabel = usesRadiusScope ? "selected radius" : "entire coverage";
+
+  return (
+    <section
+      className="control-section uncommon-episodes"
+      aria-labelledby="uncommon-episodes-heading"
+    >
+      <div className="section-title-row">
+        <h2 id="uncommon-episodes-heading">Uncommon-space episodes</h2>
+        <span>{usesRadiusScope ? "Local" : "Global"}</span>
+      </div>
+      <p className="control-help uncommon-disclosure">
+        Scores use distinct-episode frequency across arm-specific voxel entries.
+        Higher scores mean an episode reached entries shared with fewer exported
+        coverage episodes. Raw visit counts are a separate metric.
+      </p>
+      <p className="control-help uncommon-disclosure">
+        Scores describe only this exported coverage set, not the full dataset or
+        physical workspace generally. A score is not a probability, percentile,
+        task-quality judgment, or anomaly label.
+      </p>
+      <label className="field-label" htmlFor="uncommon-episode-scope">
+        Episode scoring scope
+      </label>
+      <select
+        id="uncommon-episode-scope"
+        value={usesRadiusScope ? "radius" : "coverage"}
+        onChange={(event) =>
+          setRadiusScopeSelection(
+            event.target.value === "radius" ? selection : null,
+          )
+        }
+      >
+        <option value="coverage">Entire coverage</option>
+        <option value="radius" disabled={selection === null}>
+          Selected radius
+        </option>
+      </select>
+      {selection === null ? (
+        <small className="control-help">
+          Select an occupied voxel to score episodes within a radius.
+        </small>
+      ) : null}
+      {episodeCount === 1 ? (
+        <p className="uncommon-special-state" role="note">
+          Relative uncommonness is unavailable with one coverage episode;
+          scores are defined as zero.
+        </p>
+      ) : null}
+      <p
+        className="uncommon-result-summary"
+        aria-atomic="true"
+        aria-live="polite"
+      >
+        {scores.length} {scores.length === 1 ? "episode" : "episodes"} ranked
+        for {scopeLabel}.
+      </p>
+      {scores.length === 0 && usesRadiusScope ? (
+        <p className="uncommon-special-state">
+          No episode evidence exists in the current radius.
+        </p>
+      ) : (
+        <ol
+          className="uncommon-episode-list"
+          aria-label={`Uncommon-space episode ranking for ${scopeLabel}`}
+        >
+          {scores.map((result) => (
+            <li key={result.episodeId}>
+              <div className="uncommon-episode-heading">
+                <strong>Episode {result.episodeId}</strong>
+                <span>
+                  Uncommonness {(result.score * 100).toFixed(1)} / 100
+                </span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Arm-specific entries touched</dt>
+                  <dd>{result.touchedEntryCount.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>Scoped entries touched</dt>
+                  <dd>{(result.scopeEntryShare * 100).toFixed(1)}%</dd>
+                </div>
+                <div>
+                  <dt>Distinct episodes represented</dt>
+                  <dd>
+                    {result.minimumDistinctEpisodeCount}–
+                    {result.maximumDistinctEpisodeCount} per entry
+                  </dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }
 
 export function AtlasViewer() {
@@ -477,6 +623,14 @@ export function AtlasViewer() {
             </div>
           ) : <p className="control-help">Select an occupied voxel in the scene.</p>}
         </section>
+
+        <UncommonEpisodesSection
+          coverage={coverage}
+          episodeCount={manifest.dataset.episodeCount}
+          episodeIds={manifest.dataset.episodeIds}
+          radiusResult={radiusResult}
+          selection={viewer.selection}
+        />
 
         <section className="control-section" aria-labelledby="playback-heading">
           <div className="section-title-row"><h2 id="playback-heading">Trajectory playback</h2><span>Optional payload</span></div>
