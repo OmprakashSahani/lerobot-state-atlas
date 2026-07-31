@@ -178,6 +178,7 @@ export function InteractionLayer({
               baseline,
             )}
             orientationXyzw={sample.left.orientationXyzw}
+            recordedGripperValue={sample.left.recordedGripperValue}
           />
           <EndEffectorMarker
             arm="right"
@@ -188,6 +189,7 @@ export function InteractionLayer({
               baseline,
             )}
             orientationXyzw={sample.right.orientationXyzw}
+            recordedGripperValue={sample.right.recordedGripperValue}
           />
         </group>
       ) : null}

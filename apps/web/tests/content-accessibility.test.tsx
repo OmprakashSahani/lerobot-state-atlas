@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
@@ -143,10 +149,12 @@ function trajectoriesWithOptionalState(
               episodes: positionOnlyTrajectories.episodes.map((episode) => ({
                 episodeId: episode.episodeId,
                 leftRecordedGripperValues: episode.frameIndices.map(
-                  (_, index) => -index,
+                  (_, index) =>
+                    episode.episodeId === 0 ? -0.5 - index : -10 - index,
                 ),
                 rightRecordedGripperValues: episode.frameIndices.map(
-                  (_, index) => index + 2,
+                  (_, index) =>
+                    episode.episodeId === 0 ? index + 2.25 : index + 100,
                 ),
               })),
             },
@@ -327,6 +335,9 @@ describe("accessible product content", () => {
     expect(screen.getByLabelText("Timeline")).toBeVisible();
     expect(screen.getByLabelText("Playback speed")).toBeVisible();
     expect(screen.getByLabelText("Loop playback")).toBeVisible();
+    expect(
+      screen.queryByRole("group", { name: "Recorded raw gripper values" }),
+    ).not.toBeInTheDocument();
   });
 
   it("threads matching required and optional episodes together", async () => {
@@ -346,6 +357,23 @@ describe("accessible product content", () => {
       currentViewerCanvasProps().orientationEpisode
         ?.leftOrientationsXyzw[0],
     ).toEqual([0, 0, 0, 1]);
+    const initialRawValues = screen.getByRole("group", {
+      name: "Recorded raw gripper values",
+    });
+    expect(within(initialRawValues).getByText("-0.5")).toBeVisible();
+    expect(within(initialRawValues).getByText("2.25")).toBeVisible();
+    expect(within(initialRawValues).getByText(/Symbolic display only/)).toHaveTextContent(
+      "Values are raw and device-specific; physical jaw width is not calibrated, and open/closed polarity is not established.",
+    );
+
+    fireEvent.change(screen.getByLabelText("Timeline"), {
+      target: { value: "1" },
+    });
+    const advancedRawValues = screen.getByRole("group", {
+      name: "Recorded raw gripper values",
+    });
+    expect(within(advancedRawValues).getByText("-1.5")).toBeVisible();
+    expect(within(advancedRawValues).getByText("3.25")).toBeVisible();
 
     fireEvent.change(screen.getByLabelText("Episode"), {
       target: { value: "1" },
@@ -359,6 +387,11 @@ describe("accessible product content", () => {
       currentViewerCanvasProps().orientationEpisode
         ?.leftOrientationsXyzw[0],
     ).toEqual([1, 0, 0, 0]);
+    const switchedRawValues = screen.getByRole("group", {
+      name: "Recorded raw gripper values",
+    });
+    expect(within(switchedRawValues).getByText("-10")).toBeVisible();
+    expect(within(switchedRawValues).getByText("100")).toBeVisible();
   });
 
   it.each([
@@ -388,6 +421,23 @@ describe("accessible product content", () => {
           ? currentViewerCanvasProps().orientationEpisode
           : currentViewerCanvasProps().recordedGripperEpisode,
       ).toBeNull();
+      if (availableCapability === "gripper") {
+        expect(
+          screen.getByRole("group", {
+            name: "Recorded raw gripper values",
+          }),
+        ).toBeVisible();
+      } else {
+        expect(
+          screen.queryByRole("group", {
+            name: "Recorded raw gripper values",
+          }),
+        ).not.toBeInTheDocument();
+        expect(screen.getByText("Invalid gripper fixture.")).toHaveAttribute(
+          "role",
+          "note",
+        );
+      }
     },
   );
 

@@ -860,6 +860,43 @@ a {
   gap: 0.35rem;
 }
 
+.raw-gripper-readout {
+  background: #0b1d2a;
+  margin-top: 0.45rem;
+  padding: 0.65rem;
+}
+
+.raw-gripper-readout dl,
+.raw-gripper-readout dl div {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+}
+
+.raw-gripper-readout dl {
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.raw-gripper-readout dt,
+.raw-gripper-readout dd {
+  font-size: 0.63rem;
+  margin: 0;
+}
+
+.raw-gripper-readout dd {
+  color: var(--cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.raw-gripper-readout p,
+.playback-capability-note {
+  color: var(--muted);
+  font-size: 0.6rem;
+  line-height: 1.45;
+  margin: 0.45rem 0 0;
+}
+
 .button-row {
   display: flex;
   gap: 0.5rem;

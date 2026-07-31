@@ -17,6 +17,7 @@ import {
   advancePlayback,
   episodeVideoTime,
   formatPlaybackStatus,
+  selectRecordedPlaybackSample,
   shouldSeekEpisodeVideo,
   type PlaybackState,
 } from "@/lib/playback/controller";
@@ -134,6 +135,14 @@ export function AtlasViewer() {
           (item) => item.episodeId === episodeId,
         ) ?? null
       : null;
+  const recordedSample = episode
+    ? selectRecordedPlaybackSample(
+        episode,
+        playback.frame,
+        orientationEpisode ?? undefined,
+        recordedGripperEpisode ?? undefined,
+      )
+    : null;
   const videoEpisode =
     episodeVideos.status === "ready"
       ? episodeVideos.data.episodes.find(
@@ -242,9 +251,7 @@ export function AtlasViewer() {
       ? selectedCoverage.episodeIdOffsets[viewer.selection.voxelEntryIndex + 1] -
         selectedCoverage.episodeIdOffsets[viewer.selection.voxelEntryIndex]
       : 0;
-  const frameIndex = episode
-    ? Math.min(episode.frameIndices.length - 1, Math.floor(playback.frame))
-    : 0;
+  const frameIndex = recordedSample?.index ?? 0;
 
   const commitSpacingInput = () => {
     const input = spacingInputRef.current;
@@ -491,6 +498,43 @@ export function AtlasViewer() {
               <span className="playback-status">
                 {formatPlaybackStatus(episode, playback.frame)}
               </span>
+              {recordedSample?.left.recordedGripperValue !== undefined ||
+              recordedSample?.right.recordedGripperValue !== undefined ? (
+                <div
+                  aria-label="Recorded raw gripper values"
+                  className="raw-gripper-readout"
+                  role="group"
+                >
+                  <dl>
+                    {recordedSample.left.recordedGripperValue !== undefined ? (
+                      <div>
+                        <dt>Left raw value</dt>
+                        <dd>
+                          {String(recordedSample.left.recordedGripperValue)}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {recordedSample.right.recordedGripperValue !== undefined ? (
+                      <div>
+                        <dt>Right raw value</dt>
+                        <dd>
+                          {String(recordedSample.right.recordedGripperValue)}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                  <p>
+                    Symbolic display only. Values are raw and device-specific;
+                    physical jaw width is not calibrated, and open/closed
+                    polarity is not established.
+                  </p>
+                </div>
+              ) : null}
+              {trajectories.data.gripper.status === "degraded" ? (
+                <p className="playback-capability-note" role="note">
+                  {trajectories.data.gripper.warning}
+                </p>
+              ) : null}
               <label className="field-label" htmlFor="playback-speed">Playback speed</label>
               <select id="playback-speed" value={playback.speed} onChange={(event) => setPlayback((state) => ({ ...state, speed: Number(event.target.value) }))}>
                 <option value="0.5">0.5×</option><option value="1">1×</option><option value="2">2×</option>
