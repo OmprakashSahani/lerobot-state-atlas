@@ -5,6 +5,7 @@ import math
 import torch
 from torch import Tensor
 
+from lerobot_state_atlas.orientation import validate_rotation_matrices
 from lerobot_state_atlas.urdf import JointDefinition, RobotModel
 
 
@@ -13,12 +14,65 @@ _DEFAULT_CHUNK_SIZE = 65_536
 
 @dataclass(frozen=True)
 class ToolTrajectory:
-    """Three-dimensional tool positions computed from robot states."""
+    """Tool poses computed from robot states.
+
+    Rotation matrices have shape ``(num_frames, 3, 3)`` and express the
+    tool-link orientation in the same coordinate frame as ``positions``.
+    Optional recorded gripper values are authoritative raw dataset scalars
+    with device-specific semantics, not calibrated gripper geometry.
+    """
 
     arm: str
     link_name: str
     positions: Tensor
+    rotation_matrices: Tensor
     episode_indices: Tensor | None = None
+    recorded_gripper_values: Tensor | None = None
+
+    def __post_init__(self) -> None:
+        if self.positions.ndim != 2 or self.positions.shape[1] != 3:
+            raise ValueError("Trajectory positions must have shape (num_frames, 3).")
+        if self.positions.shape[0] == 0:
+            raise ValueError("Trajectory must contain at least one point.")
+
+        rotation_matrices = validate_rotation_matrices(self.rotation_matrices)
+
+        if rotation_matrices.shape[0] != self.positions.shape[0]:
+            raise ValueError(
+                "Trajectory position and rotation frame counts must match."
+            )
+
+        object.__setattr__(self, "rotation_matrices", rotation_matrices)
+
+        if (
+            self.episode_indices is not None
+            and self.episode_indices.shape[0] != self.positions.shape[0]
+        ):
+            raise ValueError(
+                "Trajectory episode index count must match the number of frames."
+            )
+
+        if self.recorded_gripper_values is not None:
+            gripper_values = (
+                self.recorded_gripper_values.detach()
+                .to(device="cpu", dtype=torch.float64)
+                .clone()
+            )
+            if gripper_values.ndim != 1:
+                raise ValueError("Recorded gripper values must be one-dimensional.")
+            if gripper_values.shape[0] != self.positions.shape[0]:
+                raise ValueError(
+                    "Recorded gripper value count must match the number of frames."
+                )
+            if not torch.isfinite(gripper_values).all().item():
+                raise ValueError(
+                    "Recorded gripper values must contain only finite values."
+                )
+            object.__setattr__(
+                self,
+                "recorded_gripper_values",
+                gripper_values,
+            )
 
     @property
     def num_frames(self) -> int:
@@ -42,6 +96,14 @@ def build_trlc_dk1_joint_component_map(
         raise ValueError("Arm must be either 'left' or 'right'.")
 
     return {f"joint{index}": f"{arm}_joint_{index}.pos" for index in range(1, 7)}
+
+
+def build_trlc_dk1_gripper_component_name(arm: str) -> str:
+    """Return the raw recorded TRLC-DK1 gripper state component name."""
+    if arm not in {"left", "right"}:
+        raise ValueError("Arm must be either 'left' or 'right'.")
+
+    return f"{arm}_gripper.pos"
 
 
 def _origin_transform(joint: JointDefinition) -> Tensor:
@@ -216,12 +278,12 @@ def _find_joint_chain(
     return tuple(chain)
 
 
-def _compute_chunk_positions(
+def _compute_chunk_poses(
     state_values: Tensor,
     chain: Sequence[JointDefinition],
     component_indices: Mapping[str, int],
     joint_component_map: Mapping[str, str],
-) -> Tensor:
+) -> tuple[Tensor, Tensor]:
     num_frames = int(state_values.shape[0])
 
     transform = (
@@ -250,7 +312,10 @@ def _compute_chunk_positions(
             joint_positions,
         )
 
-    return transform[:, :3, 3].clone()
+    return (
+        transform[:, :3, 3].clone(),
+        transform[:, :3, :3].clone(),
+    )
 
 
 def compute_tool_trajectory(
@@ -263,8 +328,9 @@ def compute_tool_trajectory(
     link_name: str = "tool0",
     chunk_size: int = _DEFAULT_CHUNK_SIZE,
     episode_indices: Tensor | None = None,
+    gripper_component_name: str | None = None,
 ) -> ToolTrajectory:
-    """Convert batched joint states into three-dimensional tool positions."""
+    """Compute tool poses and optionally preserve authoritative raw recorded gripper values."""
     if states.ndim != 2:
         raise ValueError("States must have shape (num_frames, state_dimension).")
 
@@ -336,6 +402,14 @@ def compute_tool_trajectory(
 
     component_indices = {name: index for index, name in enumerate(names)}
 
+    if gripper_component_name is not None:
+        if not gripper_component_name:
+            raise ValueError("Gripper component name must not be empty.")
+        if gripper_component_name not in component_indices:
+            raise ValueError(
+                f"Missing gripper state component: {gripper_component_name}"
+            )
+
     missing_components = tuple(
         joint_component_map[joint.name]
         for joint in movable_joints
@@ -350,22 +424,33 @@ def compute_tool_trajectory(
         device="cpu",
         dtype=torch.float64,
     )
+    if not torch.isfinite(state_values).all().item():
+        raise ValueError("States must contain only finite values.")
+
+    recorded_gripper_values = (
+        None
+        if gripper_component_name is None
+        else state_values[:, component_indices[gripper_component_name]].clone()
+    )
     position_chunks: list[Tensor] = []
+    rotation_chunks: list[Tensor] = []
 
     for start in range(0, num_frames, chunk_size):
         stop = min(start + chunk_size, num_frames)
-        position_chunks.append(
-            _compute_chunk_positions(
-                state_values[start:stop],
-                chain,
-                component_indices,
-                joint_component_map,
-            )
+        positions, rotation_matrices = _compute_chunk_poses(
+            state_values[start:stop],
+            chain,
+            component_indices,
+            joint_component_map,
         )
+        position_chunks.append(positions)
+        rotation_chunks.append(rotation_matrices)
 
     return ToolTrajectory(
         arm=arm,
         link_name=link_name,
         positions=torch.cat(position_chunks, dim=0),
+        rotation_matrices=torch.cat(rotation_chunks, dim=0),
         episode_indices=normalized_episode_indices,
+        recorded_gripper_values=recorded_gripper_values,
     )

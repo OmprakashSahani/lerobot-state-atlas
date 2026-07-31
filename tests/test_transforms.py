@@ -10,15 +10,25 @@ from lerobot_state_atlas.transforms import (
 )
 
 
-def make_trajectory(positions: torch.Tensor) -> ToolTrajectory:
+def make_trajectory(
+    positions: torch.Tensor,
+    rotation_matrices: torch.Tensor | None = None,
+    recorded_gripper_values: torch.Tensor | None = None,
+) -> ToolTrajectory:
     return ToolTrajectory(
         arm="left",
         link_name="tool0",
         positions=positions,
+        rotation_matrices=(
+            torch.eye(3, dtype=torch.float64).expand(positions.shape[0], -1, -1).clone()
+            if rotation_matrices is None
+            else rotation_matrices
+        ),
         episode_indices=torch.tensor(
             [4, 7],
             dtype=torch.int64,
         ),
+        recorded_gripper_values=recorded_gripper_values,
     )
 
 
@@ -61,6 +71,115 @@ def test_transform_tool_trajectory_applies_translation_and_rotation() -> None:
         transformed.episode_indices,
         trajectory.episode_indices,
     )
+    torch.testing.assert_close(
+        transformed.rotation_matrices,
+        transform.rotation_matrix().expand(2, -1, -1),
+        atol=1e-12,
+        rtol=1e-12,
+    )
+
+
+def test_identity_rotation_preserves_trajectory_rotations() -> None:
+    rotations = torch.tensor(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        ],
+        dtype=torch.float64,
+    )
+    trajectory = make_trajectory(torch.zeros((2, 3)), rotations)
+
+    transformed = transform_tool_trajectory(trajectory, RigidTransform())
+
+    torch.testing.assert_close(transformed.rotation_matrices, rotations)
+
+
+def test_translation_only_preserves_trajectory_rotations() -> None:
+    rotations = torch.tensor(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        ],
+        dtype=torch.float64,
+    )
+    trajectory = make_trajectory(torch.zeros((2, 3)), rotations)
+
+    transformed = transform_tool_trajectory(
+        trajectory,
+        RigidTransform(translation_xyz=(1.0, -2.0, 3.0)),
+    )
+
+    torch.testing.assert_close(transformed.rotation_matrices, rotations)
+
+
+def test_base_rotation_left_composes_noncommuting_tool_rotation() -> None:
+    tool_rotation_x = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]],
+        dtype=torch.float64,
+    )
+    trajectory = make_trajectory(
+        torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=torch.float32,
+        ),
+        tool_rotation_x.expand(2, -1, -1).clone().to(dtype=torch.float32),
+    )
+    original_positions = trajectory.positions.clone()
+    original_rotations = trajectory.rotation_matrices.clone()
+    base_transform = RigidTransform(rotation_rpy=(0.0, 0.0, math.pi / 2.0))
+    base_rotation_z = base_transform.rotation_matrix()
+
+    transformed = transform_tool_trajectory(trajectory, base_transform)
+
+    expected = (base_rotation_z @ tool_rotation_x).expand(2, -1, -1)
+    wrong_order = (tool_rotation_x @ base_rotation_z).expand(2, -1, -1)
+    torch.testing.assert_close(transformed.rotation_matrices, expected)
+    assert not torch.allclose(transformed.rotation_matrices, wrong_order)
+    assert transformed.positions.shape[0] == transformed.rotation_matrices.shape[0]
+    assert transformed.positions.device.type == "cpu"
+    assert transformed.rotation_matrices.device.type == "cpu"
+    assert transformed.positions.dtype == torch.float64
+    assert transformed.rotation_matrices.dtype == torch.float64
+    torch.testing.assert_close(trajectory.positions, original_positions)
+    torch.testing.assert_close(trajectory.rotation_matrices, original_rotations)
+
+
+@pytest.mark.parametrize(
+    "transform",
+    (
+        RigidTransform(),
+        RigidTransform(translation_xyz=(0.5, -1.0, 2.0)),
+        RigidTransform(rotation_rpy=(0.2, -0.4, 0.7)),
+    ),
+)
+def test_transform_preserves_raw_recorded_gripper_values(
+    transform: RigidTransform,
+) -> None:
+    recorded_values = torch.tensor([-2.5, 4.25], dtype=torch.float32)
+    trajectory = make_trajectory(
+        torch.zeros((2, 3), dtype=torch.float64),
+        recorded_gripper_values=recorded_values,
+    )
+    source_values = trajectory.recorded_gripper_values.clone()
+
+    transformed = transform_tool_trajectory(trajectory, transform)
+
+    torch.testing.assert_close(
+        transformed.recorded_gripper_values,
+        torch.tensor([-2.5, 4.25], dtype=torch.float64),
+    )
+    assert transformed.recorded_gripper_values is not trajectory.recorded_gripper_values
+    assert transformed.recorded_gripper_values.device.type == "cpu"
+    assert transformed.recorded_gripper_values.dtype == torch.float64
+    torch.testing.assert_close(trajectory.recorded_gripper_values, source_values)
+
+
+def test_transform_preserves_absent_recorded_gripper_values() -> None:
+    trajectory = make_trajectory(torch.zeros((2, 3), dtype=torch.float64))
+
+    transformed = transform_tool_trajectory(trajectory, RigidTransform())
+
+    assert transformed.recorded_gripper_values is None
 
 
 @pytest.mark.parametrize(

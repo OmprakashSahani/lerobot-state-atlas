@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
-import coverageJson from "@/public/atlas-data/demo-v1/coverage.json";
-import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
+import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
+import coverageJson from "@/public/atlas-data/demo-v2/coverage.json";
+import trajectoriesJson from "@/public/atlas-data/demo-v2/trajectories.json";
 import { decodeManifest } from "@/lib/atlas-schema/validate";
 import {
   loadDemoBundle,
@@ -14,7 +14,7 @@ const episodeVideosJson = {
   schema: {
     name: "lerobot-state-atlas.browser-data",
     major: 1,
-    minor: 1,
+    minor: 2,
   },
   defaultCameraId: "top",
   cameras: [
@@ -47,7 +47,6 @@ const episodeVideosJson = {
 function manifestWithEpisodeVideos() {
   return decodeManifest({
     ...manifestJson,
-    schema: { ...manifestJson.schema, minor: 1 },
     payloads: [
       ...manifestJson.payloads,
       {
@@ -82,8 +81,8 @@ describe("bundle loading", () => {
     const bundle = await loadDemoBundle(fetcher, "development");
 
     expect(urls).toEqual([
-      "/atlas-data/demo-v1/manifest.json",
-      "/atlas-data/demo-v1/coverage.json",
+      "/atlas-data/demo-v2/manifest.json",
+      "/atlas-data/demo-v2/coverage.json",
     ]);
     expect(bundle.preparedArms).toHaveLength(2);
     expect(options).toEqual([{ cache: "no-store" }, { cache: "no-store" }]);
@@ -136,10 +135,12 @@ describe("bundle loading", () => {
       "development",
     );
     expect(fetcher).toHaveBeenCalledWith(
-      "/atlas-data/demo-v1/trajectories.json",
+      "/atlas-data/demo-v2/trajectories.json",
       { cache: "no-store" },
     );
     expect(result.episodes.map((episode) => episode.episodeId)).toEqual([0, 1]);
+    expect(result.orientation.status).toBe("available");
+    expect(result.gripper.status).toBe("available");
   });
 
   it("handles a missing optional trajectory payload", async () => {
@@ -162,7 +163,7 @@ describe("bundle loading", () => {
     );
 
     expect(fetcher).toHaveBeenCalledWith(
-      "/atlas-data/demo-v1/episode-videos.json",
+      "/atlas-data/demo-v2/episode-videos.json",
       { cache: "no-store" },
     );
     expect(result.defaultCameraId).toBe("top");
@@ -184,4 +185,109 @@ describe("bundle loading", () => {
       loadEpisodeVideos(manifestWithEpisodeVideos(), invalidFetcher),
     ).rejects.toThrow(/must contain cameras/);
   });
+
+  it.each(["orientation", "gripper"] as const)(
+    "loads video metadata after degraded %s trajectory state",
+    async (degradedCapability) => {
+      const manifest = decodeManifest({
+        ...manifestJson,
+        schema: { ...manifestJson.schema, minor: 2 },
+        trajectoryState: {
+          orientation: {
+            available: true,
+            representation: "unit-quaternion",
+            componentOrder: ["x", "y", "z", "w"],
+            frame: "canonical-shared-world",
+            samplePolicy: "recorded-sample",
+          },
+          gripper: {
+            available: true,
+            leftSourceComponent: "left_gripper.pos",
+            rightSourceComponent: "right_gripper.pos",
+            valueSemantics: "raw-device-specific-unproven",
+            physicalJawWidthCalibrated: false,
+            polarityEstablished: false,
+            visualizationGeometryCalibrated: false,
+          },
+        },
+        payloads: [
+          ...manifestJson.payloads,
+          {
+            kind: "episode-videos",
+            filename: "episode-videos.json",
+            required: false,
+            encoding: "json",
+            byteSize: 1234,
+            sha256: "b".repeat(64),
+          },
+        ],
+      });
+      const trajectoryPayload = {
+        schema: {
+          name: "lerobot-state-atlas.browser-data",
+          major: 1,
+          minor: 2,
+        },
+        episodes: [
+          {
+            episodeId: 0,
+            frameIndices: [0],
+            timestampsSeconds: [0],
+            leftPositionsXyz: [[0, 0.4, 0]],
+            rightPositionsXyz: [[0, -0.4, 0]],
+            leftOrientationsXyzw: [[0, 0, 0, 1]],
+            ...(degradedCapability === "orientation"
+              ? {}
+              : { rightOrientationsXyzw: [[0, 0, 0, 1]] }),
+            leftRecordedGripperValues: [-0.5],
+            ...(degradedCapability === "gripper"
+              ? {}
+              : { rightRecordedGripperValues: [2.5] }),
+          },
+        ],
+      };
+      const videoPayload = {
+        ...episodeVideosJson,
+        schema: { ...episodeVideosJson.schema, minor: 2 },
+      };
+      const urls: string[] = [];
+      const fetcher = vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        urls.push(url);
+        return new Response(
+          JSON.stringify(
+            url.endsWith("trajectories.json")
+              ? trajectoryPayload
+              : videoPayload,
+          ),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch;
+
+      const trajectories = await loadTrajectories(
+        manifest,
+        fetcher,
+        "development",
+      );
+      expect(trajectories.episodes).toHaveLength(1);
+      expect(trajectories[degradedCapability].status).toBe("degraded");
+      expect(
+        trajectories[
+          degradedCapability === "orientation" ? "gripper" : "orientation"
+        ].status,
+      ).toBe("available");
+      const videos = await loadEpisodeVideos(
+        manifest,
+        fetcher,
+        "development",
+      );
+
+      expect(videos.defaultCameraId).toBe("top");
+      expect(urls).toEqual([
+        "/atlas-data/demo-v2/trajectories.json",
+        "/atlas-data/demo-v2/episode-videos.json",
+      ]);
+      expect(urls.some((url) => url.includes("enhanced"))).toBe(false);
+    },
+  );
 });

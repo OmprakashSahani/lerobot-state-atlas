@@ -6,9 +6,14 @@ import type {
   EpisodeVideoEpisode,
   EpisodeVideoPayload,
   EpisodeVideoSource,
+  OptionalTrajectoryCapability,
+  QuaternionXyzw,
   SchemaVersion,
   TrajectoryEpisode,
+  TrajectoryOrientationData,
   TrajectoryPayload,
+  TrajectoryRecordedGripperData,
+  TrajectoryStateManifest,
   Vector3,
 } from "./types";
 
@@ -91,15 +96,132 @@ function schema(value: unknown, label: string): SchemaVersion {
       `Unsupported browser-data major version: ${String(candidate.major)}.`,
     );
   }
+  const minor = integer(candidate.minor, `${label}.schema.minor`);
+  if (minor > 2) {
+    throw new AtlasDataError(
+      `Unsupported browser-data minor version: ${String(minor)}.`,
+    );
+  }
   return {
     name: candidate.name,
     major: 1,
-    minor: integer(candidate.minor, `${label}.schema.minor`),
+    minor,
+  };
+}
+
+const MANIFEST_FIELDS = [
+  "schema",
+  "bundleId",
+  "exporter",
+  "dataset",
+  "robot",
+  "coverage",
+  "coordinates",
+  "totals",
+  "sceneBounds",
+  "payloads",
+] as const;
+
+function decodeTrajectoryState(value: unknown): TrajectoryStateManifest {
+  const state = object(value, "Manifest trajectoryState");
+  exactFields(
+    state,
+    ["orientation", "gripper"],
+    "Manifest trajectoryState",
+  );
+  const orientation = object(
+    state.orientation,
+    "Manifest trajectoryState orientation",
+  );
+  exactFields(
+    orientation,
+    [
+      "available",
+      "representation",
+      "componentOrder",
+      "frame",
+      "samplePolicy",
+    ],
+    "Manifest trajectoryState orientation",
+  );
+  if (
+    typeof orientation.available !== "boolean" ||
+    orientation.representation !== "unit-quaternion" ||
+    !Array.isArray(orientation.componentOrder) ||
+    orientation.componentOrder.length !== 4 ||
+    orientation.componentOrder[0] !== "x" ||
+    orientation.componentOrder[1] !== "y" ||
+    orientation.componentOrder[2] !== "z" ||
+    orientation.componentOrder[3] !== "w" ||
+    orientation.frame !== "canonical-shared-world" ||
+    orientation.samplePolicy !== "recorded-sample"
+  ) {
+    throw new AtlasDataError(
+      "Manifest trajectoryState orientation metadata is unsupported.",
+    );
+  }
+
+  const gripper = object(
+    state.gripper,
+    "Manifest trajectoryState gripper",
+  );
+  exactFields(
+    gripper,
+    [
+      "available",
+      "leftSourceComponent",
+      "rightSourceComponent",
+      "valueSemantics",
+      "physicalJawWidthCalibrated",
+      "polarityEstablished",
+      "visualizationGeometryCalibrated",
+    ],
+    "Manifest trajectoryState gripper",
+  );
+  if (
+    typeof gripper.available !== "boolean" ||
+    gripper.leftSourceComponent !== "left_gripper.pos" ||
+    gripper.rightSourceComponent !== "right_gripper.pos" ||
+    gripper.valueSemantics !== "raw-device-specific-unproven" ||
+    gripper.physicalJawWidthCalibrated !== false ||
+    gripper.polarityEstablished !== false ||
+    gripper.visualizationGeometryCalibrated !== false
+  ) {
+    throw new AtlasDataError(
+      "Manifest trajectoryState gripper metadata is unsupported.",
+    );
+  }
+
+  return {
+    orientation: {
+      available: orientation.available,
+      representation: "unit-quaternion",
+      componentOrder: ["x", "y", "z", "w"],
+      frame: "canonical-shared-world",
+      samplePolicy: "recorded-sample",
+    },
+    gripper: {
+      available: gripper.available,
+      leftSourceComponent: "left_gripper.pos",
+      rightSourceComponent: "right_gripper.pos",
+      valueSemantics: "raw-device-specific-unproven",
+      physicalJawWidthCalibrated: false,
+      polarityEstablished: false,
+      visualizationGeometryCalibrated: false,
+    },
   };
 }
 
 export function decodeManifest(value: unknown): AtlasManifest {
   const candidate = object(value, "Manifest");
+  const decodedManifestSchema = schema(candidate.schema, "Manifest");
+  exactFields(
+    candidate,
+    decodedManifestSchema.minor >= 2 && "trajectoryState" in candidate
+      ? [...MANIFEST_FIELDS, "trajectoryState"]
+      : MANIFEST_FIELDS,
+    "Manifest",
+  );
   const dataset = object(candidate.dataset, "Manifest dataset");
   const exporter = object(candidate.exporter, "Manifest exporter");
   const robot = object(candidate.robot, "Manifest robot");
@@ -112,7 +234,6 @@ export function decodeManifest(value: unknown): AtlasManifest {
     "Canonical transforms",
   );
 
-  const decodedManifestSchema = schema(candidate.schema, "Manifest");
   if (!Array.isArray(candidate.payloads)) {
     throw new AtlasDataError("Manifest payloads must be an array.");
   }
@@ -148,6 +269,21 @@ export function decodeManifest(value: unknown): AtlasManifest {
       "Episode-video payloads require browser-data schema v1.1 or newer.",
     );
   }
+  const hasTrajectories = payloads.some(
+    (payload) => payload.kind === "trajectories",
+  );
+  const hasTrajectoryState = "trajectoryState" in candidate;
+  if (
+    decodedManifestSchema.minor >= 2 &&
+    hasTrajectories !== hasTrajectoryState
+  ) {
+    throw new AtlasDataError(
+      "Schema v1.2 manifests must contain trajectoryState exactly when trajectories are referenced.",
+    );
+  }
+  const trajectoryState = hasTrajectoryState
+    ? decodeTrajectoryState(candidate.trajectoryState)
+    : undefined;
   if (!Array.isArray(dataset.episodeIds)) {
     throw new AtlasDataError("Dataset episode IDs must be an array.");
   }
@@ -221,7 +357,12 @@ export function decodeManifest(value: unknown): AtlasManifest {
     throw new AtlasDataError("Demo spacing must be explicitly uncalibrated.");
   }
 
-  return candidate as unknown as AtlasManifest & {
+  return {
+    ...candidate,
+    schema: decodedManifestSchema,
+    payloads,
+    ...(trajectoryState === undefined ? {} : { trajectoryState }),
+  } as unknown as AtlasManifest & {
     schema: SchemaVersion;
     dataset: { episodeIds: number[] };
     payloads: typeof payloads;
@@ -320,15 +461,220 @@ export function decodeCoverage(value: unknown): CoveragePayload {
   };
 }
 
-export function decodeTrajectories(value: unknown): TrajectoryPayload {
+const REQUIRED_TRAJECTORY_EPISODE_FIELDS = [
+  "episodeId",
+  "frameIndices",
+  "timestampsSeconds",
+  "leftPositionsXyz",
+  "rightPositionsXyz",
+] as const;
+
+const ENHANCED_TRAJECTORY_EPISODE_FIELDS = [
+  "leftOrientationsXyzw",
+  "rightOrientationsXyzw",
+  "leftRecordedGripperValues",
+  "rightRecordedGripperValues",
+] as const;
+
+function quaternionXyzw(value: unknown, label: string): QuaternionXyzw {
+  if (!Array.isArray(value) || value.length !== 4) {
+    throw new AtlasDataError(`${label} must contain four XYZW numbers.`);
+  }
+  const result: QuaternionXyzw = [
+    numberValue(value[0], label, Number.NEGATIVE_INFINITY),
+    numberValue(value[1], label, Number.NEGATIVE_INFINITY),
+    numberValue(value[2], label, Number.NEGATIVE_INFINITY),
+    numberValue(value[3], label, Number.NEGATIVE_INFINITY),
+  ];
+  const norm = Math.hypot(...result);
+  if (Math.abs(norm - 1) > 1e-6) {
+    throw new AtlasDataError(`${label} must be a unit quaternion.`);
+  }
+  return result;
+}
+
+function degradedCapability<T>(
+  capability: "Orientation" | "Gripper",
+  error: unknown,
+): OptionalTrajectoryCapability<T> {
+  return {
+    status: "degraded",
+    warning: `${capability} data was ignored: ${
+      error instanceof Error ? error.message : "invalid optional state"
+    }`,
+  };
+}
+
+function decodeOrientationCapability(
+  episodes: Record<string, unknown>[],
+  requiredEpisodes: TrajectoryEpisode[],
+  declaredAvailable: boolean,
+): OptionalTrajectoryCapability<TrajectoryOrientationData> {
+  const fieldsPresent = episodes.some(
+    (episode) =>
+      "leftOrientationsXyzw" in episode ||
+      "rightOrientationsXyzw" in episode,
+  );
+  if (!declaredAvailable && !fieldsPresent) return { status: "unavailable" };
+
+  try {
+    const decodedEpisodes = episodes.map((episode, index) => {
+      const episodeId = requiredEpisodes[index].episodeId;
+      if (
+        !Array.isArray(episode.leftOrientationsXyzw) ||
+        !Array.isArray(episode.rightOrientationsXyzw)
+      ) {
+        throw new AtlasDataError(
+          `Trajectory episode ${episodeId} must contain paired orientation arrays.`,
+        );
+      }
+      const leftOrientationsXyzw = episode.leftOrientationsXyzw.map(
+        (value, itemIndex) =>
+          quaternionXyzw(
+            value,
+            `Trajectory episode ${episodeId} left orientation ${itemIndex}`,
+          ),
+      );
+      const rightOrientationsXyzw = episode.rightOrientationsXyzw.map(
+        (value, itemIndex) =>
+          quaternionXyzw(
+            value,
+            `Trajectory episode ${episodeId} right orientation ${itemIndex}`,
+          ),
+      );
+      const frameCount = requiredEpisodes[index].frameIndices.length;
+      if (
+        leftOrientationsXyzw.length !== frameCount ||
+        rightOrientationsXyzw.length !== frameCount
+      ) {
+        throw new AtlasDataError(
+          `Trajectory episode ${episodeId} orientation arrays must match the frame count.`,
+        );
+      }
+      return {
+        episodeId,
+        leftOrientationsXyzw,
+        rightOrientationsXyzw,
+      };
+    });
+    if (!declaredAvailable) {
+      throw new AtlasDataError(
+        "Manifest declares orientation unavailable but trajectory fields are present.",
+      );
+    }
+    return {
+      status: "available",
+      data: { episodes: decodedEpisodes },
+    };
+  } catch (error) {
+    return degradedCapability("Orientation", error);
+  }
+}
+
+function decodeGripperCapability(
+  episodes: Record<string, unknown>[],
+  requiredEpisodes: TrajectoryEpisode[],
+  declaredAvailable: boolean,
+): OptionalTrajectoryCapability<TrajectoryRecordedGripperData> {
+  const fieldsPresent = episodes.some(
+    (episode) =>
+      "leftRecordedGripperValues" in episode ||
+      "rightRecordedGripperValues" in episode,
+  );
+  if (!declaredAvailable && !fieldsPresent) return { status: "unavailable" };
+
+  try {
+    const decodedEpisodes = episodes.map((episode, index) => {
+      const episodeId = requiredEpisodes[index].episodeId;
+      if (
+        !Array.isArray(episode.leftRecordedGripperValues) ||
+        !Array.isArray(episode.rightRecordedGripperValues)
+      ) {
+        throw new AtlasDataError(
+          `Trajectory episode ${episodeId} must contain paired raw gripper arrays.`,
+        );
+      }
+      const leftRecordedGripperValues =
+        episode.leftRecordedGripperValues.map((value, itemIndex) =>
+          numberValue(
+            value,
+            `Trajectory episode ${episodeId} left raw gripper value ${itemIndex}`,
+            Number.NEGATIVE_INFINITY,
+          ),
+        );
+      const rightRecordedGripperValues =
+        episode.rightRecordedGripperValues.map((value, itemIndex) =>
+          numberValue(
+            value,
+            `Trajectory episode ${episodeId} right raw gripper value ${itemIndex}`,
+            Number.NEGATIVE_INFINITY,
+          ),
+        );
+      const frameCount = requiredEpisodes[index].frameIndices.length;
+      if (
+        leftRecordedGripperValues.length !== frameCount ||
+        rightRecordedGripperValues.length !== frameCount
+      ) {
+        throw new AtlasDataError(
+          `Trajectory episode ${episodeId} raw gripper arrays must match the frame count.`,
+        );
+      }
+      return {
+        episodeId,
+        leftRecordedGripperValues,
+        rightRecordedGripperValues,
+      };
+    });
+    if (!declaredAvailable) {
+      throw new AtlasDataError(
+        "Manifest declares gripper unavailable but trajectory fields are present.",
+      );
+    }
+    return {
+      status: "available",
+      data: { episodes: decodedEpisodes },
+    };
+  } catch (error) {
+    return degradedCapability("Gripper", error);
+  }
+}
+
+export function decodeTrajectories(
+  value: unknown,
+  manifest: AtlasManifest,
+): TrajectoryPayload {
   const candidate = object(value, "Trajectory payload");
   const decodedSchema = schema(candidate.schema, "Trajectory payload");
+  if (
+    decodedSchema.name !== manifest.schema.name ||
+    decodedSchema.major !== manifest.schema.major ||
+    decodedSchema.minor !== manifest.schema.minor
+  ) {
+    throw new AtlasDataError(
+      "Trajectory payload schema version must match the manifest.",
+    );
+  }
   if (!Array.isArray(candidate.episodes) || candidate.episodes.length === 0) {
     throw new AtlasDataError("Trajectory payload must contain episodes.");
   }
   const seen = new Set<number>();
-  const episodes = candidate.episodes.map((rawEpisode, episodeIndex) => {
+  const rawEpisodes = candidate.episodes.map((rawEpisode, episodeIndex) => {
     const episode = object(rawEpisode, `Trajectory episode ${episodeIndex}`);
+    exactFields(
+      episode,
+      decodedSchema.minor >= 2
+        ? [
+            ...REQUIRED_TRAJECTORY_EPISODE_FIELDS,
+            ...ENHANCED_TRAJECTORY_EPISODE_FIELDS.filter(
+              (field) => field in episode,
+            ),
+          ]
+        : REQUIRED_TRAJECTORY_EPISODE_FIELDS,
+      `Trajectory episode ${episodeIndex}`,
+    );
+    return episode;
+  });
+  const episodes = rawEpisodes.map((episode, episodeIndex) => {
     const episodeId = integer(
       episode.episodeId,
       `Trajectory episode ${episodeIndex} ID`,
@@ -388,7 +734,33 @@ export function decodeTrajectories(value: unknown): TrajectoryPayload {
       rightPositionsXyz,
     } satisfies TrajectoryEpisode;
   });
-  return { schema: decodedSchema, episodes };
+  if (decodedSchema.minor < 2) {
+    return {
+      schema: decodedSchema,
+      episodes,
+      orientation: { status: "unavailable" },
+      gripper: { status: "unavailable" },
+    };
+  }
+  if (!manifest.trajectoryState) {
+    throw new AtlasDataError(
+      "Schema v1.2 trajectory decoding requires manifest trajectoryState.",
+    );
+  }
+  return {
+    schema: decodedSchema,
+    episodes,
+    orientation: decodeOrientationCapability(
+      rawEpisodes,
+      episodes,
+      manifest.trajectoryState.orientation.available,
+    ),
+    gripper: decodeGripperCapability(
+      rawEpisodes,
+      episodes,
+      manifest.trajectoryState.gripper.available,
+    ),
+  };
 }
 
 function episodeVideoFilename(value: unknown, label: string): string {

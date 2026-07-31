@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import coverageJson from "@/public/atlas-data/demo-v1/coverage.json";
-import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
+import coverageJson from "@/public/atlas-data/demo-v2/coverage.json";
+import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
 import { decodeCoverage, decodeManifest } from "@/lib/atlas-schema/validate";
 import { metricDomain, metricValue } from "@/lib/data/metrics";
 import { prepareCoverage } from "@/lib/data/prepareCoverage";

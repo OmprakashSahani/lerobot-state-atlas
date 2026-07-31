@@ -8,10 +8,13 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import type {
   AtlasData,
   TrajectoryEpisode,
+  TrajectoryEpisodeOrientations,
+  TrajectoryEpisodeRecordedGripperValues,
   Vector3,
 } from "@/lib/atlas-schema/types";
 import { applyRuntimeSpacing } from "@/lib/coordinates/runtimeSpacing";
-import { playbackPositions } from "@/lib/playback/controller";
+import { selectRecordedPlaybackSample } from "@/lib/playback/controller";
+import { EndEffectorMarker } from "./EndEffectorMarker";
 import { useViewerStore } from "./ViewerStore";
 
 function WidePath({
@@ -63,34 +66,17 @@ function WidePath({
   return <primitive object={line} />;
 }
 
-function ToolMarker({
-  position,
-  color,
-}: {
-  position: Vector3;
-  color: string;
-}) {
-  return (
-    <mesh position={position} renderOrder={30}>
-      <sphereGeometry args={[0.014, 18, 12]} />
-      <meshStandardMaterial
-        color={color}
-        depthTest={false}
-        depthWrite={false}
-        emissive={color}
-        emissiveIntensity={0.8}
-      />
-    </mesh>
-  );
-}
-
 export function InteractionLayer({
   data,
   episode,
+  orientationEpisode,
+  recordedGripperEpisode,
   playbackFrame,
 }: {
   data: AtlasData;
   episode: TrajectoryEpisode | null;
+  orientationEpisode: TrajectoryEpisodeOrientations | null;
+  recordedGripperEpisode: TrajectoryEpisodeRecordedGripperValues | null;
   playbackFrame: number;
 }) {
   const viewer = useViewerStore();
@@ -103,7 +89,14 @@ export function InteractionLayer({
         baseline,
       )
     : null;
-  const positions = episode ? playbackPositions(episode, playbackFrame) : null;
+  const sample = episode
+    ? selectRecordedPlaybackSample(
+        episode,
+        playbackFrame,
+        orientationEpisode ?? undefined,
+        recordedGripperEpisode ?? undefined,
+      )
+    : null;
   const leftPath = useMemo(
     () =>
       episode?.leftPositionsXyz.map((point) =>
@@ -119,12 +112,12 @@ export function InteractionLayer({
     [baseline, episode, viewer.spacing],
   );
   const travelledLeftPath = useMemo(
-    () => leftPath.slice(0, (positions?.index ?? 0) + 1),
-    [leftPath, positions?.index],
+    () => leftPath.slice(0, (sample?.index ?? 0) + 1),
+    [leftPath, sample?.index],
   );
   const travelledRightPath = useMemo(
-    () => rightPath.slice(0, (positions?.index ?? 0) + 1),
-    [positions?.index, rightPath],
+    () => rightPath.slice(0, (sample?.index ?? 0) + 1),
+    [rightPath, sample?.index],
   );
   return (
     <group name="interaction-layer">
@@ -146,7 +139,7 @@ export function InteractionLayer({
           </mesh>
         </group>
       ) : null}
-      {episode && positions ? (
+      {episode && sample ? (
         <group name="trajectory-playback">
           <WidePath
             points={leftPath}
@@ -176,23 +169,27 @@ export function InteractionLayer({
             opacity={0.96}
             renderOrder={21}
           />
-          <ToolMarker
+          <EndEffectorMarker
+            arm="left"
             position={applyRuntimeSpacing(
-              positions.left,
+              sample.left.position,
               "left",
               viewer.spacing,
               baseline,
             )}
-            color="#5ee4ff"
+            orientationXyzw={sample.left.orientationXyzw}
+            recordedGripperValue={sample.left.recordedGripperValue}
           />
-          <ToolMarker
+          <EndEffectorMarker
+            arm="right"
             position={applyRuntimeSpacing(
-              positions.right,
+              sample.right.position,
               "right",
               viewer.spacing,
               baseline,
             )}
-            color="#ff6f91"
+            orientationXyzw={sample.right.orientationXyzw}
+            recordedGripperValue={sample.right.recordedGripperValue}
           />
         </group>
       ) : null}

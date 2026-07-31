@@ -34,6 +34,9 @@ def make_trajectory(
         arm=arm,
         link_name=link_name,
         positions=positions,
+        rotation_matrices=torch.eye(3, dtype=torch.float64)
+        .expand(positions.shape[0], -1, -1)
+        .clone(),
     )
 
 
@@ -376,6 +379,7 @@ def test_plot_separates_episode_paths() -> None:
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(4, -1, -1).clone(),
         episode_indices=torch.tensor(
             [7, 7, 3, 3],
             dtype=torch.int64,
@@ -432,6 +436,7 @@ def test_plot_splits_repeated_episode_segments() -> None:
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(6, -1, -1).clone(),
         episode_indices=torch.tensor(
             [7, 7, 3, 3, 7, 7],
             dtype=torch.int64,
@@ -483,6 +488,7 @@ def test_plot_labels_and_marks_each_episode() -> None:
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(4, -1, -1).clone(),
         episode_indices=torch.tensor(
             [7, 7, 3, 3],
             dtype=torch.int64,
@@ -536,6 +542,7 @@ def test_plot_uses_episode_marker_labels_and_neutral_voxels() -> None:
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(4, -1, -1).clone(),
         episode_indices=torch.tensor(
             [0, 0, 1, 1],
             dtype=torch.int64,
@@ -597,6 +604,7 @@ def test_plot_reuses_color_for_repeated_episode_segments() -> None:
             ],
             dtype=torch.float64,
         ),
+        rotation_matrices=torch.eye(3, dtype=torch.float64).expand(6, -1, -1).clone(),
         episode_indices=torch.tensor(
             [7, 7, 3, 3, 7, 7],
             dtype=torch.int64,

@@ -1,6 +1,9 @@
 import type {
   EpisodeVideoSource,
   TrajectoryEpisode,
+  TrajectoryEpisodeOrientations,
+  TrajectoryEpisodeRecordedGripperValues,
+  QuaternionXyzw,
   Vector3,
 } from "@/lib/atlas-schema/types";
 
@@ -60,18 +63,42 @@ export function advancePlayback(
   return { ...state, frame: last, playing: false };
 }
 
-export function playbackPositions(
+export interface RecordedSampleArm {
+  position: Vector3;
+  orientationXyzw?: QuaternionXyzw;
+  recordedGripperValue?: number;
+}
+
+export interface RecordedPlaybackSample {
+  index: number;
+  left: RecordedSampleArm;
+  right: RecordedSampleArm;
+}
+
+export function selectRecordedPlaybackSample(
   episode: TrajectoryEpisode,
   frame: number,
-): { left: Vector3; right: Vector3; index: number } {
+  orientationEpisode?: TrajectoryEpisodeOrientations,
+  recordedGripperEpisode?: TrajectoryEpisodeRecordedGripperValues,
+): RecordedPlaybackSample {
   const index = Math.max(
     0,
     Math.min(episode.frameIndices.length - 1, Math.floor(frame)),
   );
   return {
-    left: episode.leftPositionsXyz[index],
-    right: episode.rightPositionsXyz[index],
     index,
+    left: {
+      position: episode.leftPositionsXyz[index],
+      orientationXyzw: orientationEpisode?.leftOrientationsXyzw[index],
+      recordedGripperValue:
+        recordedGripperEpisode?.leftRecordedGripperValues[index],
+    },
+    right: {
+      position: episode.rightPositionsXyz[index],
+      orientationXyzw: orientationEpisode?.rightOrientationsXyzw[index],
+      recordedGripperValue:
+        recordedGripperEpisode?.rightRecordedGripperValues[index],
+    },
   };
 }
 

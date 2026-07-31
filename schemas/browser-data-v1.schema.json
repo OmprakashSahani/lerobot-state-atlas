@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/OmprakashSahani/lerobot-state-atlas/schemas/browser-data-v1.schema.json",
-  "title": "LeRobot State Atlas browser data v1.1",
+  "title": "LeRobot State Atlas browser data v1.2",
   "description": "Structural schema for manifest, coverage, optional trajectory, and optional episode-video documents. Cross-file checksums, CSR consistency, aggregate totals, ordering, media integrity, and path safety are enforced by validate-browser-data.",
   "oneOf": [
     { "$ref": "#/$defs/manifest" },
@@ -17,7 +17,7 @@
       "properties": {
         "name": { "const": "lerobot-state-atlas.browser-data" },
         "major": { "const": 1 },
-        "minor": { "type": "integer", "minimum": 0 }
+        "minor": { "type": "integer", "minimum": 0, "maximum": 2 }
       }
     },
     "vector3": {
@@ -37,6 +37,65 @@
         { "type": "integer" }
       ],
       "items": false
+    },
+    "quaternionXyzw": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "items": false
+    },
+    "trajectoryState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["orientation", "gripper"],
+      "properties": {
+        "orientation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "representation",
+            "componentOrder",
+            "frame",
+            "samplePolicy"
+          ],
+          "properties": {
+            "available": { "type": "boolean" },
+            "representation": { "const": "unit-quaternion" },
+            "componentOrder": {
+              "const": ["x", "y", "z", "w"]
+            },
+            "frame": { "const": "canonical-shared-world" },
+            "samplePolicy": { "const": "recorded-sample" }
+          }
+        },
+        "gripper": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "leftSourceComponent",
+            "rightSourceComponent",
+            "valueSemantics",
+            "physicalJawWidthCalibrated",
+            "polarityEstablished",
+            "visualizationGeometryCalibrated"
+          ],
+          "properties": {
+            "available": { "type": "boolean" },
+            "leftSourceComponent": { "const": "left_gripper.pos" },
+            "rightSourceComponent": { "const": "right_gripper.pos" },
+            "valueSemantics": { "const": "raw-device-specific-unproven" },
+            "physicalJawWidthCalibrated": { "const": false },
+            "polarityEstablished": { "const": false },
+            "visualizationGeometryCalibrated": { "const": false }
+          }
+        }
+      }
     },
     "transform": {
       "type": "object",
@@ -255,8 +314,44 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/payloadReference" }
+        },
+        "trajectoryState": { "$ref": "#/$defs/trajectoryState" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "schema": {
+                "properties": { "minor": { "maximum": 1 } }
+              }
+            }
+          },
+          "then": { "not": { "required": ["trajectoryState"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "schema": {
+                "properties": { "minor": { "const": 2 } }
+              }
+            }
+          },
+          "then": {
+            "if": {
+              "properties": {
+                "payloads": {
+                  "contains": {
+                    "properties": { "kind": { "const": "trajectories" } },
+                    "required": ["kind"]
+                  }
+                }
+              }
+            },
+            "then": { "required": ["trajectoryState"] },
+            "else": { "not": { "required": ["trajectoryState"] } }
+          }
         }
-      }
+      ]
     },
     "coverageArm": {
       "type": "object",
@@ -333,7 +428,7 @@
         }
       }
     },
-    "trajectoryEpisode": {
+    "trajectoryEpisodeLegacy": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -367,6 +462,66 @@
         }
       }
     },
+    "trajectoryEpisode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "episodeId",
+        "frameIndices",
+        "timestampsSeconds",
+        "leftPositionsXyz",
+        "rightPositionsXyz"
+      ],
+      "properties": {
+        "episodeId": { "type": "integer", "minimum": 0 },
+        "frameIndices": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "timestampsSeconds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number" }
+        },
+        "leftPositionsXyz": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/vector3" }
+        },
+        "rightPositionsXyz": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/vector3" }
+        },
+        "leftOrientationsXyzw": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/quaternionXyzw" }
+        },
+        "rightOrientationsXyzw": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/quaternionXyzw" }
+        },
+        "leftRecordedGripperValues": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number" }
+        },
+        "rightRecordedGripperValues": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number" }
+        }
+      },
+      "dependentRequired": {
+        "leftOrientationsXyzw": ["rightOrientationsXyzw"],
+        "rightOrientationsXyzw": ["leftOrientationsXyzw"],
+        "leftRecordedGripperValues": ["rightRecordedGripperValues"],
+        "rightRecordedGripperValues": ["leftRecordedGripperValues"]
+      }
+    },
     "trajectoryPayload": {
       "type": "object",
       "additionalProperties": false,
@@ -375,10 +530,34 @@
         "schema": { "$ref": "#/$defs/schemaVersion" },
         "episodes": {
           "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/$defs/trajectoryEpisode" }
+          "minItems": 1
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "schema": {
+                "properties": { "minor": { "maximum": 1 } }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "episodes": {
+                "items": { "$ref": "#/$defs/trajectoryEpisodeLegacy" }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "episodes": {
+                "items": { "$ref": "#/$defs/trajectoryEpisode" }
+              }
+            }
+          }
+        }
+      ]
     },
     "episodeVideoCamera": {
       "type": "object",

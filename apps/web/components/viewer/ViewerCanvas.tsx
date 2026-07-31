@@ -9,7 +9,12 @@ import { useEffect, useMemo, useRef } from "react";
 import { Box3, PerspectiveCamera, Sphere, Vector3 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-import type { AtlasData, TrajectoryEpisode } from "@/lib/atlas-schema/types";
+import type {
+  AtlasData,
+  TrajectoryEpisode,
+  TrajectoryEpisodeOrientations,
+  TrajectoryEpisodeRecordedGripperValues,
+} from "@/lib/atlas-schema/types";
 
 import { EnvironmentLayer, gridEnvironment } from "./EnvironmentLayer";
 import { InteractionLayer } from "./InteractionLayer";
@@ -79,10 +84,14 @@ function CameraController({ data }: { data: AtlasData }) {
 export function ViewerCanvas({
   data,
   episode,
+  orientationEpisode,
+  recordedGripperEpisode,
   playbackFrame,
 }: {
   data: AtlasData;
   episode: TrajectoryEpisode | null;
+  orientationEpisode: TrajectoryEpisodeOrientations | null;
+  recordedGripperEpisode: TrajectoryEpisodeRecordedGripperValues | null;
   playbackFrame: number;
 }) {
   return (
@@ -106,6 +115,8 @@ export function ViewerCanvas({
       <InteractionLayer
         data={data}
         episode={episode}
+        orientationEpisode={orientationEpisode}
+        recordedGripperEpisode={recordedGripperEpisode}
         playbackFrame={playbackFrame}
       />
       <CameraController data={data} />

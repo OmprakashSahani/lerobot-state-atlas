@@ -694,7 +694,7 @@ def export_browser_data_command(
         None,
         "--episode-video-metadata",
         help=(
-            "Optional v1.1 episode-video metadata JSON. Requires "
+            "Optional v1.2 episode-video metadata JSON. Requires "
             "--episode-video-media-root."
         ),
         exists=True,

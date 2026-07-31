@@ -37,9 +37,13 @@ from lerobot_state_atlas.dataset import (
     resolve_dataset_revision,
 )
 from lerobot_state_atlas.schema import DatasetSummary
+from lerobot_state_atlas.orientation import (
+    rotation_matrices_to_quaternions_xyzw,
+)
 from lerobot_state_atlas.state import load_state_batch
 from lerobot_state_atlas.trajectory import (
     ToolTrajectory,
+    build_trlc_dk1_gripper_component_name,
     build_trlc_dk1_joint_component_map,
     compute_tool_trajectory,
 )
@@ -189,6 +193,23 @@ def _trajectory_payload(
         )
         for arm, trajectory in trajectories.items()
     }
+    arm_orientations = {
+        arm: rotation_matrices_to_quaternions_xyzw(
+            trajectory.rotation_matrices,
+            normalized_episode_indices,
+        )
+        for arm, trajectory in trajectories.items()
+    }
+    arm_gripper_values: dict[str, torch.Tensor] = {}
+    for arm, trajectory in trajectories.items():
+        if trajectory.recorded_gripper_values is None:
+            raise ValueError(
+                f"{arm.capitalize()} trajectory is missing recorded gripper values."
+            )
+        arm_gripper_values[arm] = trajectory.recorded_gripper_values.detach().to(
+            device="cpu",
+            dtype=torch.float64,
+        )
 
     episodes: list[dict[str, Any]] = []
     for episode_id in sorted(selected_episodes):
@@ -204,6 +225,12 @@ def _trajectory_payload(
                 "timestampsSeconds": normalized_timestamps[mask].tolist(),
                 "leftPositionsXyz": arm_positions["left"][mask].tolist(),
                 "rightPositionsXyz": arm_positions["right"][mask].tolist(),
+                "leftOrientationsXyzw": arm_orientations["left"][mask].tolist(),
+                "rightOrientationsXyzw": arm_orientations["right"][mask].tolist(),
+                "leftRecordedGripperValues": arm_gripper_values["left"][mask].tolist(),
+                "rightRecordedGripperValues": arm_gripper_values["right"][
+                    mask
+                ].tolist(),
             }
         )
 
@@ -400,6 +427,35 @@ def build_browser_data_documents(
         "sceneBounds": _scene_bounds(coverage, voxel_size),
         "payloads": payloads,
     }
+    if trajectory_payload is not None:
+        episodes = trajectory_payload.get("episodes", [])
+        orientation_available = bool(episodes) and all(
+            "leftOrientationsXyzw" in episode and "rightOrientationsXyzw" in episode
+            for episode in episodes
+        )
+        gripper_available = bool(episodes) and all(
+            "leftRecordedGripperValues" in episode
+            and "rightRecordedGripperValues" in episode
+            for episode in episodes
+        )
+        manifest["trajectoryState"] = {
+            "orientation": {
+                "available": orientation_available,
+                "representation": "unit-quaternion",
+                "componentOrder": ["x", "y", "z", "w"],
+                "frame": "canonical-shared-world",
+                "samplePolicy": "recorded-sample",
+            },
+            "gripper": {
+                "available": gripper_available,
+                "leftSourceComponent": "left_gripper.pos",
+                "rightSourceComponent": "right_gripper.pos",
+                "valueSemantics": "raw-device-specific-unproven",
+                "physicalJawWidthCalibrated": False,
+                "polarityEstablished": False,
+                "visualizationGeometryCalibrated": False,
+            },
+        }
     return (
         manifest,
         coverage_bytes,
@@ -601,6 +657,7 @@ def export_browser_data(
                 build_trlc_dk1_joint_component_map(arm),
                 arm=arm,
                 episode_indices=batch.episode_indices,
+                gripper_component_name=build_trlc_dk1_gripper_component_name(arm),
             )
             trajectories[arm] = transform_tool_trajectory(local, transforms[arm])
         trajectory_document = _trajectory_payload(

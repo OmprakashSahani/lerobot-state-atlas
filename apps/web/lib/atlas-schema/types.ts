@@ -1,4 +1,5 @@
 export type Vector3 = [number, number, number];
+export type QuaternionXyzw = [number, number, number, number];
 
 export interface SchemaVersion {
   name: "lerobot-state-atlas.browser-data";
@@ -77,6 +78,51 @@ export interface AtlasManifest {
     maximumXyz: Vector3;
   };
   payloads: PayloadReference[];
+  trajectoryState?: TrajectoryStateManifest;
+}
+
+export interface TrajectoryStateManifest {
+  orientation: {
+    available: boolean;
+    representation: "unit-quaternion";
+    componentOrder: ["x", "y", "z", "w"];
+    frame: "canonical-shared-world";
+    samplePolicy: "recorded-sample";
+  };
+  gripper: {
+    available: boolean;
+    leftSourceComponent: "left_gripper.pos";
+    rightSourceComponent: "right_gripper.pos";
+    valueSemantics: "raw-device-specific-unproven";
+    physicalJawWidthCalibrated: false;
+    polarityEstablished: false;
+    visualizationGeometryCalibrated: false;
+  };
+}
+
+export type OptionalTrajectoryCapability<T> =
+  | { status: "available"; data: T }
+  | { status: "unavailable" }
+  | { status: "degraded"; warning: string };
+
+export interface TrajectoryEpisodeOrientations {
+  episodeId: number;
+  leftOrientationsXyzw: QuaternionXyzw[];
+  rightOrientationsXyzw: QuaternionXyzw[];
+}
+
+export interface TrajectoryOrientationData {
+  episodes: TrajectoryEpisodeOrientations[];
+}
+
+export interface TrajectoryEpisodeRecordedGripperValues {
+  episodeId: number;
+  leftRecordedGripperValues: number[];
+  rightRecordedGripperValues: number[];
+}
+
+export interface TrajectoryRecordedGripperData {
+  episodes: TrajectoryEpisodeRecordedGripperValues[];
 }
 
 export interface CoverageArm {
@@ -112,6 +158,8 @@ export interface TrajectoryEpisode {
 export interface TrajectoryPayload {
   schema: SchemaVersion;
   episodes: TrajectoryEpisode[];
+  orientation: OptionalTrajectoryCapability<TrajectoryOrientationData>;
+  gripper: OptionalTrajectoryCapability<TrajectoryRecordedGripperData>;
 }
 
 export interface EpisodeVideoCamera {

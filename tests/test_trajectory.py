@@ -4,6 +4,8 @@ import pytest
 import torch
 
 from lerobot_state_atlas.trajectory import (
+    ToolTrajectory,
+    build_trlc_dk1_gripper_component_name,
     build_trlc_dk1_joint_component_map,
     compute_tool_trajectory,
 )
@@ -33,7 +35,7 @@ def make_model() -> RobotModel:
                 parent_link="arm_link",
                 child_link="tool0",
                 origin_xyz=(1.0, 0.0, 0.0),
-                origin_rpy=(0.0, 0.0, 0.0),
+                origin_rpy=(math.pi / 2.0, 0.0, 0.0),
                 axis=None,
                 lower_limit=None,
                 upper_limit=None,
@@ -62,6 +64,16 @@ def test_build_trlc_dk1_joint_component_map_rejects_arm() -> None:
         match="either 'left' or 'right'",
     ):
         build_trlc_dk1_joint_component_map("center")
+
+
+def test_build_trlc_dk1_gripper_component_name() -> None:
+    assert build_trlc_dk1_gripper_component_name("left") == "left_gripper.pos"
+    assert build_trlc_dk1_gripper_component_name("right") == "right_gripper.pos"
+
+
+def test_build_trlc_dk1_gripper_component_name_rejects_arm() -> None:
+    with pytest.raises(ValueError, match="either 'left' or 'right'"):
+        build_trlc_dk1_gripper_component_name("center")
 
 
 def test_compute_tool_trajectory() -> None:
@@ -93,10 +105,30 @@ def test_compute_tool_trajectory() -> None:
         ],
         dtype=torch.float64,
     )
+    expected_rotations = torch.tensor(
+        [
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0],
+                [0.0, 1.0, 0.0],
+            ],
+            [
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+        ],
+        dtype=torch.float64,
+    )
 
     assert trajectory.arm == "left"
     assert trajectory.link_name == "tool0"
     assert trajectory.num_frames == 2
+    assert trajectory.positions.device.type == "cpu"
+    assert trajectory.positions.dtype == torch.float64
+    assert trajectory.rotation_matrices.device.type == "cpu"
+    assert trajectory.rotation_matrices.dtype == torch.float64
+    assert trajectory.recorded_gripper_values is None
 
     torch.testing.assert_close(
         trajectory.positions,
@@ -104,6 +136,139 @@ def test_compute_tool_trajectory() -> None:
         atol=1e-6,
         rtol=1e-6,
     )
+    torch.testing.assert_close(
+        trajectory.rotation_matrices,
+        expected_rotations,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+
+
+def test_compute_tool_trajectory_includes_fixed_tool_rotation() -> None:
+    trajectory = compute_tool_trajectory(
+        torch.tensor([[0.0]], dtype=torch.float32),
+        component_names=("left_joint_1.pos",),
+        model=make_model(),
+        joint_component_map={"joint1": "left_joint_1.pos"},
+        arm="left",
+    )
+
+    torch.testing.assert_close(
+        trajectory.rotation_matrices,
+        torch.tensor(
+            [
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 0.0, -1.0],
+                    [0.0, 1.0, 0.0],
+                ]
+            ],
+            dtype=torch.float64,
+        ),
+        atol=1e-12,
+        rtol=1e-12,
+    )
+
+
+def test_compute_tool_trajectory_extracts_distinct_raw_gripper_values() -> None:
+    component_names = (
+        "left_joint_1.pos",
+        "left_joint_2.pos",
+        "left_joint_3.pos",
+        "left_joint_4.pos",
+        "left_joint_5.pos",
+        "left_joint_6.pos",
+        "left_gripper.pos",
+        "right_joint_1.pos",
+        "right_joint_2.pos",
+        "right_joint_3.pos",
+        "right_joint_4.pos",
+        "right_joint_5.pos",
+        "right_joint_6.pos",
+        "right_gripper.pos",
+    )
+    states = torch.zeros((2, 14), dtype=torch.float32)
+    states[:, 6] = torch.tensor([-0.5, 2.25])
+    states[:, 13] = torch.tensor([100.0, -3.0])
+    original_states = states.clone()
+
+    left = compute_tool_trajectory(
+        states,
+        component_names,
+        make_model(),
+        {"joint1": "left_joint_1.pos"},
+        arm="left",
+        episode_indices=torch.tensor([8, 8]),
+        gripper_component_name=build_trlc_dk1_gripper_component_name("left"),
+    )
+    right = compute_tool_trajectory(
+        states,
+        component_names,
+        make_model(),
+        {"joint1": "right_joint_1.pos"},
+        arm="right",
+        episode_indices=torch.tensor([8, 8]),
+        gripper_component_name=build_trlc_dk1_gripper_component_name("right"),
+    )
+
+    torch.testing.assert_close(
+        left.recorded_gripper_values,
+        torch.tensor([-0.5, 2.25], dtype=torch.float64),
+    )
+    torch.testing.assert_close(
+        right.recorded_gripper_values,
+        torch.tensor([100.0, -3.0], dtype=torch.float64),
+    )
+    assert not torch.equal(
+        left.recorded_gripper_values,
+        right.recorded_gripper_values,
+    )
+    assert left.recorded_gripper_values.ndim == 1
+    assert left.recorded_gripper_values.device.type == "cpu"
+    assert left.recorded_gripper_values.dtype == torch.float64
+    assert left.positions.shape[0] == left.rotation_matrices.shape[0]
+    assert left.rotation_matrices.shape[0] == left.recorded_gripper_values.shape[0]
+    assert left.recorded_gripper_values.shape[0] == left.episode_indices.shape[0]
+    torch.testing.assert_close(states, original_states)
+
+
+def test_compute_tool_trajectory_rejects_missing_gripper_component() -> None:
+    with pytest.raises(ValueError, match="Missing gripper state component"):
+        compute_tool_trajectory(
+            torch.zeros((1, 1)),
+            ("left_joint_1.pos",),
+            make_model(),
+            {"joint1": "left_joint_1.pos"},
+            arm="left",
+            gripper_component_name="left_gripper.pos",
+        )
+
+
+def test_compute_tool_trajectory_rejects_empty_gripper_component_name() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        compute_tool_trajectory(
+            torch.zeros((1, 1)),
+            ("left_joint_1.pos",),
+            make_model(),
+            {"joint1": "left_joint_1.pos"},
+            arm="left",
+            gripper_component_name="",
+        )
+
+
+@pytest.mark.parametrize("invalid_value", (float("nan"), float("inf"), float("-inf")))
+def test_compute_tool_trajectory_rejects_nonfinite_gripper_values(
+    invalid_value: float,
+) -> None:
+    with pytest.raises(ValueError, match="States must contain only finite values"):
+        compute_tool_trajectory(
+            torch.tensor([[0.0, invalid_value]], dtype=torch.float64),
+            ("left_joint_1.pos", "left_gripper.pos"),
+            make_model(),
+            {"joint1": "left_joint_1.pos"},
+            arm="left",
+            gripper_component_name="left_gripper.pos",
+        )
 
 
 def test_compute_tool_trajectory_rejects_non_matrix() -> None:
@@ -274,6 +439,10 @@ def test_compute_tool_trajectory_matches_across_chunks() -> None:
         chunked.positions,
         unchunked.positions,
     )
+    torch.testing.assert_close(
+        chunked.rotation_matrices,
+        unchunked.rotation_matrices,
+    )
 
 
 def test_compute_tool_trajectory_rejects_invalid_chunk_size() -> None:
@@ -320,6 +489,8 @@ def test_compute_tool_trajectory_preserves_episode_indices() -> None:
 
     assert trajectory.num_frames == 3
     assert trajectory.num_episodes == 2
+    assert trajectory.positions.shape[0] == trajectory.rotation_matrices.shape[0]
+    assert trajectory.rotation_matrices.shape[0] == trajectory.episode_indices.shape[0]
     assert torch.equal(
         trajectory.episode_indices,
         episode_indices,
@@ -384,4 +555,98 @@ def test_compute_tool_trajectory_rejects_noninteger_episode_indices(
             },
             arm="left",
             episode_indices=episode_indices,
+        )
+
+
+@pytest.mark.parametrize("invalid_value", (float("nan"), float("inf"), float("-inf")))
+def test_compute_tool_trajectory_rejects_nonfinite_states(
+    invalid_value: float,
+) -> None:
+    with pytest.raises(ValueError, match="must contain only finite values"):
+        compute_tool_trajectory(
+            torch.tensor([[invalid_value]], dtype=torch.float64),
+            component_names=("left_joint_1.pos",),
+            model=make_model(),
+            joint_component_map={"joint1": "left_joint_1.pos"},
+            arm="left",
+        )
+
+
+def test_tool_trajectory_rejects_rotation_shape() -> None:
+    with pytest.raises(ValueError, match="must have shape \\(num_matrices, 3, 3\\)"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((2, 3), dtype=torch.float64),
+            rotation_matrices=torch.zeros((2, 4, 4), dtype=torch.float64),
+        )
+
+
+def test_tool_trajectory_rejects_pose_frame_count_mismatch() -> None:
+    with pytest.raises(ValueError, match="position and rotation frame counts"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((2, 3), dtype=torch.float64),
+            rotation_matrices=torch.eye(3, dtype=torch.float64).unsqueeze(0),
+        )
+
+
+def test_tool_trajectory_rejects_nonfinite_rotations() -> None:
+    rotation_matrices = torch.eye(3, dtype=torch.float64).unsqueeze(0)
+    rotation_matrices[0, 0, 0] = float("nan")
+
+    with pytest.raises(ValueError, match="Rotation matrices.*finite values"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((1, 3), dtype=torch.float64),
+            rotation_matrices=rotation_matrices,
+        )
+
+
+def test_tool_trajectory_rejects_mathematically_invalid_rotations() -> None:
+    with pytest.raises(ValueError, match="must be orthonormal"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((1, 3), dtype=torch.float64),
+            rotation_matrices=(2.0 * torch.eye(3, dtype=torch.float64)).unsqueeze(0),
+        )
+
+
+def test_tool_trajectory_rejects_invalid_gripper_shape() -> None:
+    with pytest.raises(ValueError, match="must be one-dimensional"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((2, 3), dtype=torch.float64),
+            rotation_matrices=torch.eye(3, dtype=torch.float64)
+            .expand(2, -1, -1)
+            .clone(),
+            recorded_gripper_values=torch.zeros((2, 1)),
+        )
+
+
+def test_tool_trajectory_rejects_gripper_frame_count_mismatch() -> None:
+    with pytest.raises(ValueError, match="count must match"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((2, 3), dtype=torch.float64),
+            rotation_matrices=torch.eye(3, dtype=torch.float64)
+            .expand(2, -1, -1)
+            .clone(),
+            recorded_gripper_values=torch.zeros(1),
+        )
+
+
+def test_tool_trajectory_rejects_nonfinite_gripper_values() -> None:
+    with pytest.raises(ValueError, match="gripper values.*finite values"):
+        ToolTrajectory(
+            arm="left",
+            link_name="tool0",
+            positions=torch.zeros((1, 3), dtype=torch.float64),
+            rotation_matrices=torch.eye(3, dtype=torch.float64).unsqueeze(0),
+            recorded_gripper_values=torch.tensor([float("nan")]),
         )

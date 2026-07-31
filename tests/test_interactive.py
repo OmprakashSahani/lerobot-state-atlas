@@ -23,6 +23,9 @@ def make_trajectory(
         arm=arm,
         link_name="tool0",
         positions=positions,
+        rotation_matrices=torch.eye(3, dtype=torch.float64)
+        .expand(positions.shape[0], -1, -1)
+        .clone(),
         episode_indices=episode_indices,
     )
 
