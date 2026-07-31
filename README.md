@@ -264,6 +264,67 @@ total **tool-point visits**. One dataset frame can contribute two tool-point
 visits, one per arm. The distinct-episode result is the exact union of stored
 CSR episode IDs across all matching entries.
 
+#### Uncommon-space episode exploration
+
+The viewer ranks recorded episodes by how uncommon their reached workspace
+entries are within the exported coverage set. This is an exploration aid, not
+an anomaly detector. It does not measure task quality, success, usefulness,
+safety, or physical novelty.
+
+Scoring uses distinct-episode incidence from the exact per-voxel CSR episode
+identities. Left and right arm voxel entries remain separate analytical entries,
+including when their integer voxel coordinates match. Raw tool-point visit
+counts are a separate metric and do not affect uncommonness scores.
+
+For a scoring scope, define:
+
+- `E` as the number of exported coverage episodes;
+- `c_v` as the number of distinct exported coverage episodes represented in
+  arm-specific voxel entry `v`; and
+- `V_i,S` as the unique arm-specific entries in scope `S` whose CSR identity
+  range contains episode `i`.
+
+For `E > 1`, entry rarity is:
+
+    r(v) = ln(E / c_v) / ln(E)
+
+For `E <= 1`, `r(v) = 0`. Episode uncommonness is the arithmetic mean of
+`r(v)` over the entries in `V_i,S`:
+
+    U(i,S) = mean(r(v) for v in V_i,S)
+
+The viewer displays `100 × U(i,S)`, normalized to a 0–100 range. It is not a
+probability or percentile. The touched-entry evidence count is shown separately.
+Averaging prevents entry breadth or episode length alone from dominating the
+score.
+
+**Entire coverage** is the default scope. **Selected radius** uses the exact
+entry identities returned by the shared-world radius query. Runtime arm spacing
+never changes an entry's rarity, although it may change which entries
+geometrically fall inside a selected radius. Hiding an arm does not alter the
+analytical scope.
+
+Results use deterministic ordering: score descending, then arm-specific entries
+touched descending, then episode ID ascending. Coverage scoring requires no
+trajectory load or additional initial request. Trajectory availability is
+checked lazily from the existing optional payload. Episodes absent from that
+payload remain valid coverage evidence and are labelled coverage-only; no
+trajectory, optional state, or video is synthesized. Orientation and raw
+gripper data continue to match only the selected exported trajectory episode.
+
+Scores describe only the episodes and voxelization in the exported bundle. They
+do not establish rarity in the full source dataset, future recordings,
+production behavior, or the physical workspace generally. Results depend on
+voxel size, selected radius, episode selection, robot model, forward kinematics,
+and shared-world transforms. A high score with little evidence should be read
+together with its touched-entry count. With one exported coverage episode,
+relative uncommonness is unavailable and scores are defined as zero.
+
+The scores are derived client-side from the existing coverage CSR data, so no
+schema revision was required. Computation remains linear in the relevant CSR
+membership for the current bundle. Full-dataset scaling is a separate future
+roadmap phase and is not claimed by this feature.
+
 Playback keeps both tool points synchronized, uses the validated dataset FPS,
 and advances from elapsed wall-clock time with selectable speed rather than
 advancing one dataset frame per browser render. Episode changes restart safely;
