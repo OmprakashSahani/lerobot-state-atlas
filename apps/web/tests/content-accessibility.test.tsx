@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,11 +27,13 @@ import {
 import { prepareCoverage } from "@/lib/data/prepareCoverage";
 import type {
   AtlasData,
+  CoveragePayload,
   TrajectoryEpisode,
   TrajectoryEpisodeOrientations,
   TrajectoryEpisodeRecordedGripperValues,
   TrajectoryPayload,
 } from "@/lib/atlas-schema/types";
+import type { VoxelSelection } from "@/lib/data/radiusQuery";
 
 const manifest = decodeManifest(manifestJson);
 const manifestWithVideos = decodeManifest({
@@ -102,6 +105,17 @@ const positionOnlyTrajectories = decodeTrajectories(
 const preparedArmsForTest = prepareCoverage(manifest, coverage);
 const setSpacingMock = vi.fn();
 let activeManifest = manifest;
+let activeCoverage: CoveragePayload = coverage;
+let activePreparedArms = preparedArmsForTest;
+let activeSelection: VoxelSelection | null = {
+  arm: "left",
+  voxelEntryIndex: 0,
+  exportedCenter: Array.from(
+    preparedArmsForTest[0].centers.slice(0, 3),
+  ) as [number, number, number],
+};
+let activeRadius = 0.05;
+let activeSpacing = manifest.coverage.armSpacing;
 let viewerCanvasProps: {
   data: AtlasData;
   episode: TrajectoryEpisode | null;
@@ -168,10 +182,31 @@ function currentViewerCanvasProps() {
   return viewerCanvasProps;
 }
 
+function rankedEpisodeRow(episodeId: number): HTMLElement {
+  const ranking = screen.getByRole("list", {
+    name: /Uncommon-space episode ranking/,
+  });
+  const row = within(ranking).getByText(`Episode ${episodeId}`).closest("li");
+  if (row === null) throw new Error(`Episode ${episodeId} row was not rendered.`);
+  return row;
+}
+
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   setSpacingMock.mockClear();
   activeManifest = manifest;
+  activeCoverage = coverage;
+  activePreparedArms = preparedArmsForTest;
+  activeSelection = {
+    arm: "left",
+    voxelEntryIndex: 0,
+    exportedCenter: Array.from(
+      preparedArmsForTest[0].centers.slice(0, 3),
+    ) as [number, number, number],
+  };
+  activeRadius = 0.05;
+  activeSpacing = manifest.coverage.armSpacing;
   viewerCanvasProps = null;
   vi.mocked(loadTrajectories).mockResolvedValue(
     decodeTrajectories(trajectoriesJson, manifest),
@@ -184,8 +219,8 @@ vi.mock("@/components/viewer/AtlasDataProvider", () => ({
     status: "ready",
     data: {
       manifest: activeManifest,
-      coverage,
-      preparedArms: prepareCoverage(activeManifest, coverage),
+      coverage: activeCoverage,
+      preparedArms: activePreparedArms,
     },
   }),
 }));
@@ -196,15 +231,9 @@ vi.mock("@/components/viewer/ViewerStore", () => ({
     rightVisible: true,
     cameraResetToken: 0,
     metric: "visits",
-    spacing: manifest.coverage.armSpacing,
-    radius: 0.05,
-    selection: {
-      arm: "left",
-      voxelEntryIndex: 0,
-      exportedCenter: Array.from(
-        preparedArmsForTest[0].centers.slice(0, 3),
-      ) as [number, number, number],
-    },
+    spacing: activeSpacing,
+    radius: activeRadius,
+    selection: activeSelection,
     autoRotate: false,
     toggleArm: vi.fn(),
     resetCamera: vi.fn(),
@@ -295,6 +324,275 @@ describe("accessible product content", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("presents an accessible global uncommon-space ranking by default", () => {
+    render(<AtlasViewer />);
+
+    expect(
+      screen.getByRole("heading", { name: "Uncommon-space episodes" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Episode scoring scope")).toHaveValue(
+      "coverage",
+    );
+    const list = screen.getByRole("list", {
+      name: "Uncommon-space episode ranking for entire coverage",
+    });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(
+      manifest.dataset.episodeCount,
+    );
+    const firstResult = within(list).getAllByRole("listitem")[0];
+    expect(within(firstResult).getByText(/Episode \d+/)).toBeVisible();
+    expect(
+      within(firstResult).getByText(/Uncommonness \d+\.\d \/ 100/),
+    ).toBeVisible();
+    expect(
+      within(firstResult).getByText("Arm-specific entries touched"),
+    ).toBeVisible();
+    expect(within(firstResult).getByText("Scoped entries touched")).toBeVisible();
+    expect(
+      within(firstResult).getByText("Distinct episodes represented"),
+    ).toBeVisible();
+    expect(screen.getByText(/Scores use distinct-episode frequency/)).toHaveTextContent(
+      "Raw visit counts are a separate metric.",
+    );
+    const limitations = screen.getByText(
+      /Scores describe only this exported coverage set/,
+    );
+    expect(limitations).toHaveTextContent(
+      "not the full dataset or physical workspace generally",
+    );
+    expect(limitations).toHaveTextContent(
+      "not a probability, percentile, task-quality judgment, or anomaly label",
+    );
+    expect(screen.getByText(/episodes ranked for entire coverage/)).toHaveAttribute(
+      "aria-live",
+      "polite",
+    );
+    expect(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    ).toBeVisible();
+    expect(screen.getAllByText("Playback availability not loaded.")).toHaveLength(
+      manifest.dataset.episodeCount,
+    );
+    expect(loadTrajectories).not.toHaveBeenCalled();
+  });
+
+  it("checks ranked playback availability with one shared lazy request", async () => {
+    render(<AtlasViewer />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    );
+
+    expect(screen.getByText("Checking playback availability…")).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(loadTrajectories).toHaveBeenCalledTimes(1);
+    expect(
+      await within(rankedEpisodeRow(0)).findByText("Playback available"),
+    ).toBeVisible();
+    const availableButton = within(rankedEpisodeRow(0)).getByRole("button", {
+      name: "Open Episode 0 playback",
+    });
+    expect(availableButton).toHaveAttribute(
+      "aria-describedby",
+      "episode-0-playback-status",
+    );
+    expect(
+      within(rankedEpisodeRow(2)).getByText(
+        "Coverage evidence only — trajectory not exported.",
+      ),
+    ).toBeVisible();
+    expect(
+      within(rankedEpisodeRow(2)).queryByRole("button", {
+        name: "Open Episode 2 playback",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shares one in-flight request between both activation actions", async () => {
+    let resolveTrajectories!: (payload: TrajectoryPayload) => void;
+    vi.mocked(loadTrajectories).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveTrajectories = resolve;
+      }),
+    );
+    render(<AtlasViewer />);
+    const checkButton = screen.getByRole("button", {
+      name: "Check playback availability",
+    });
+    const loadButton = screen.getByRole("button", { name: "Load playback" });
+
+    fireEvent.click(checkButton);
+    fireEvent.click(loadButton);
+    fireEvent.click(checkButton);
+    expect(loadTrajectories).toHaveBeenCalledTimes(1);
+
+    resolveTrajectories(positionOnlyTrajectories);
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+  });
+
+  it("opens the exact ranked episode and preserves speed and loop", async () => {
+    render(<AtlasViewer />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    );
+    await within(rankedEpisodeRow(1)).findByText("Playback available");
+
+    fireEvent.change(screen.getByLabelText("Playback speed"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(screen.getByLabelText("Loop playback"));
+    fireEvent.change(screen.getByLabelText("Timeline"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    fireEvent.click(
+      within(rankedEpisodeRow(1)).getByRole("button", {
+        name: "Open Episode 1 playback",
+      }),
+    );
+
+    expect(screen.getByLabelText("Episode")).toHaveValue("1");
+    expect(screen.getByLabelText("Episode")).toHaveFocus();
+    expect(screen.getByLabelText("Timeline")).toHaveValue("0");
+    expect(screen.getByRole("button", { name: "Play" })).toBeVisible();
+    expect(screen.getByLabelText("Playback speed")).toHaveValue("2");
+    expect(screen.getByLabelText("Loop playback")).toBeChecked();
+    expect(currentViewerCanvasProps().episode?.episodeId).toBe(1);
+    expect(currentViewerCanvasProps().orientationEpisode?.episodeId).toBe(1);
+    expect(currentViewerCanvasProps().recordedGripperEpisode?.episodeId).toBe(
+      1,
+    );
+  });
+
+  it("keeps rankings honest after loading failure and permits retry", async () => {
+    vi.mocked(loadTrajectories)
+      .mockRejectedValueOnce(new Error("Trajectory fixture failed."))
+      .mockResolvedValueOnce(positionOnlyTrajectories);
+    render(<AtlasViewer />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Check playback availability" }),
+    );
+
+    expect(await screen.findByText("Trajectory fixture failed.")).toHaveAttribute(
+      "role",
+      "alert",
+    );
+    expect(
+      screen.getAllByText("Playback availability could not be loaded."),
+    ).toHaveLength(manifest.dataset.episodeCount);
+    expect(
+      screen.getByRole("list", {
+        name: "Uncommon-space episode ranking for entire coverage",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Coverage evidence only — trajectory not exported."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry playback availability" }),
+    );
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+    expect(loadTrajectories).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables radius scoring and provides help before voxel selection", () => {
+    activeSelection = null;
+    render(<AtlasViewer />);
+
+    expect(screen.getByRole("option", { name: "Selected radius" })).toBeDisabled();
+    expect(
+      screen.getByText(/Select an occupied voxel to score episodes within a radius/),
+    ).toBeVisible();
+  });
+
+  it("updates local uncommon scores and returns safely to global scope", async () => {
+    activeRadius = 0;
+    const { rerender } = render(<AtlasViewer />);
+    const scope = screen.getByLabelText("Episode scoring scope");
+    fireEvent.change(scope, { target: { value: "radius" } });
+    const initialSummary = screen.getByText(/episodes? ranked for selected radius/)
+      .textContent;
+
+    activeRadius = 0.3;
+    rerender(<AtlasViewer />);
+    expect(screen.getByLabelText("Episode scoring scope")).toHaveValue("radius");
+    expect(screen.getByText(/episodes? ranked for selected radius/).textContent).not.toBe(
+      initialSummary,
+    );
+
+    activeSelection = null;
+    rerender(<AtlasViewer />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Episode scoring scope")).toHaveValue(
+        "coverage",
+      ),
+    );
+    expect(screen.getByRole("option", { name: "Selected radius" })).toBeDisabled();
+  });
+
+  it("shows an honest empty selected-radius state", () => {
+    activePreparedArms = preparedArmsForTest.map((arm) => ({
+      ...arm,
+      centers: new Float32Array(),
+      visits: new Uint32Array(),
+      episodeCounts: new Uint32Array(),
+      instanceLookup: [],
+    }));
+    render(<AtlasViewer />);
+    fireEvent.change(screen.getByLabelText("Episode scoring scope"), {
+      target: { value: "radius" },
+    });
+
+    expect(
+      screen.getByText("No episode evidence exists in the current radius."),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("list", {
+        name: "Uncommon-space episode ranking for selected radius",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("explains the defined zero score for one coverage episode", () => {
+    activeManifest = {
+      ...manifest,
+      dataset: {
+        ...manifest.dataset,
+        episodeIds: [0],
+        episodeCount: 1,
+      },
+    };
+    activeCoverage = {
+      schema: coverage.schema,
+      arms: (["left", "right"] as const).map((arm) => ({
+        arm,
+        toolLink: "tool0",
+        voxelIndices: [[0, 0, 0]],
+        visitCounts: [1],
+        episodeCounts: [1],
+        episodeIdOffsets: [0, 1],
+        episodeIds: [0],
+        statistics: {
+          voxelEntryCount: 1,
+          minimumVisitCount: 1,
+          maximumVisitCount: 1,
+          minimumEpisodeCount: 1,
+          maximumEpisodeCount: 1,
+        },
+      })),
+    };
+    activePreparedArms = prepareCoverage(activeManifest, activeCoverage);
+    activeSelection = null;
+    render(<AtlasViewer />);
+
+    expect(
+      screen.getByText(/Relative uncommonness is unavailable with one coverage episode/),
+    ).toHaveTextContent("scores are defined as zero");
+    expect(screen.getByText("Uncommonness 0.0 / 100")).toBeVisible();
+  });
+
   it("applies, clamps, rejects, and restores arm spacing", () => {
     render(<AtlasViewer />);
 
@@ -328,7 +626,8 @@ describe("accessible product content", () => {
   it("exposes accessible playback controls after lazy activation", async () => {
     render(<AtlasViewer />);
     screen.getByRole("button", { name: "Load playback" }).click();
-    expect(await screen.findByLabelText("Episode")).toBeVisible();
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+    expect(loadTrajectories).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Play" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Restart" })).toBeVisible();
     expect(screen.getByLabelText("Timeline")).toBeVisible();

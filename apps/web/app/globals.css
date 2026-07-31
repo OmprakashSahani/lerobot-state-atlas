@@ -855,6 +855,97 @@ a {
   text-transform: capitalize;
 }
 
+.uncommon-disclosure:first-of-type {
+  margin-top: 0;
+}
+
+.uncommon-result-summary,
+.uncommon-special-state {
+  color: var(--muted);
+  font-size: 0.63rem;
+  line-height: 1.5;
+  margin: 0.7rem 0 0;
+}
+
+.uncommon-episode-list {
+  display: grid;
+  gap: 0.55rem;
+  list-style-position: inside;
+  margin: 0.7rem 0 0;
+  padding: 0;
+}
+
+.uncommon-episode-list > li {
+  background: #0b1d2a;
+  border: 1px solid rgba(103, 232, 249, 0.16);
+  font-size: 0.63rem;
+  padding: 0.65rem;
+}
+
+.uncommon-episode-heading,
+.uncommon-episode-list dl div {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.uncommon-episode-heading {
+  color: var(--cyan);
+  margin-bottom: 0.45rem;
+}
+
+.uncommon-episode-heading span,
+.uncommon-episode-list dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.uncommon-episode-list dl {
+  display: grid;
+  gap: 0.22rem;
+  margin: 0;
+}
+
+.uncommon-episode-list dt,
+.uncommon-episode-list dd {
+  margin: 0;
+}
+
+.uncommon-episode-list dt {
+  color: var(--muted);
+}
+
+.uncommon-playback-check {
+  margin-top: 0.7rem;
+  width: 100%;
+}
+
+.uncommon-playback-state,
+.uncommon-playback-availability p {
+  color: var(--muted);
+  font-size: 0.6rem;
+  line-height: 1.45;
+}
+
+.uncommon-playback-state {
+  margin: 0.7rem 0 0;
+}
+
+.uncommon-playback-availability {
+  border-top: 1px solid rgba(103, 232, 249, 0.12);
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+}
+
+.uncommon-playback-availability p {
+  margin: 0;
+}
+
+.uncommon-playback-availability .compact-button {
+  justify-self: start;
+}
+
 .playback-controls {
   display: grid;
   gap: 0.35rem;
