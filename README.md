@@ -303,10 +303,10 @@ Generate the pinned demo bundle:
       --episode-batch-size 4 \
       --voxel-size 0.02 \
       --arm-spacing 0.8 \
-      --bundle-id demo-v1 \
-      --output apps/web/public/atlas-data/demo-v1
+      --bundle-id demo-v2 \
+      --output apps/web/public/atlas-data/demo-v2
 
-To package synchronized MP4 media into a new schema v1.1 bundle, also provide
+To package synchronized MP4 media into a new schema v1.2 bundle, also provide
 both of these options:
 
     --episode-video-metadata /path/to/episode-videos.json \
@@ -321,7 +321,7 @@ media filename declared by the metadata is resolved beneath
 Validate any bundle and its payload checksums:
 
     uv run lerobot-state-atlas validate-browser-data \
-      apps/web/public/atlas-data/demo-v1
+      apps/web/public/atlas-data/demo-v2
 
 The exporter first resolves `--dataset-revision` through the Hugging Face Hub
 to a full immutable dataset commit SHA. That SHA is passed explicitly to every
@@ -340,20 +340,24 @@ fully identified by HEAD alone. The dirty check includes modified, staged, and
 non-ignored untracked files; ignored output such as `node_modules` and `.next`
 is excluded.
 
-The included demo uses episodes 0 through 9 for coverage and episodes 0 and 1
-for the optional, currently unloaded trajectory payload. Its files are:
+The deployed `demo-v2` bundle uses schema v1.2 and includes episodes 0 through
+9 for coverage and episodes 0 and 1 for the optional, initially unloaded
+trajectory payload. Its recorded trajectory state includes end-effector XYZW
+unit quaternions and raw gripper values. The gripper values are device-specific:
+physical jaw width is not calibrated, and open/closed polarity is not
+established. `demo-v2` contains no episode-video metadata or MP4 files. Its
+files are:
 
-- `manifest.json`: 2,422 bytes uncompressed; 1,313 bytes gzip-compressed
-- `coverage.json`: 26,564 bytes uncompressed; 7,638 bytes gzip-compressed
-- `trajectories.json`: 139,152 bytes uncompressed; 57,461 bytes gzip-compressed
-- total: 168,138 bytes uncompressed; 66,412 bytes gzip-compressed
+- `manifest.json`: 2,900 bytes uncompressed; 1,534 bytes gzip-compressed
+- `coverage.json`: 26,564 bytes uncompressed; 7,652 bytes gzip-compressed
+- `trajectories.json`: 333,950 bytes uncompressed; 136,377 bytes gzip-compressed
+- total: 363,414 bytes uncompressed; 145,563 bytes gzip-compressed
 
 Compressed sizes use gzip level 9 and may vary slightly with the deployment
 CDN. The viewer loads only the manifest and coverage payload initially. The
-current public `demo-v1` bundle does not contain episode-video metadata or
-dataset MP4 files. Private or gated dataset media must not be published without
-permission; access tokens and gated remote URLs must never be embedded in a
-browser bundle.
+previously deployed `demo-v1` remains immutable and was not replaced or
+mutated. Private or gated dataset media must not be published without permission;
+access tokens and gated remote URLs must never be embedded in a browser bundle.
 
 ## Web application
 

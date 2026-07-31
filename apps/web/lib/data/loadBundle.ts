@@ -17,7 +17,7 @@ import {
   type RuntimeEnvironment,
 } from "@/lib/data/cachePolicy";
 
-const BUNDLE_BASE = "/atlas-data/demo-v1";
+const BUNDLE_BASE = "/atlas-data/demo-v2";
 
 export function episodeVideoAssetUrl(filename: string): string {
   return `${BUNDLE_BASE}/${filename}`;

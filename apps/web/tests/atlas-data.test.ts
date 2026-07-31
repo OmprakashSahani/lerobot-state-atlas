@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
-import coverageJson from "@/public/atlas-data/demo-v1/coverage.json";
+import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
+import coverageJson from "@/public/atlas-data/demo-v2/coverage.json";
 import {
   AtlasDataError,
   decodeCoverage,
@@ -15,7 +15,10 @@ describe("browser-data compatibility", () => {
     const coverage = decodeCoverage(coverageJson);
 
     expect(manifest.schema.major).toBe(1);
-    expect(manifest.bundleId).toBe("demo-v1");
+    expect(manifest.schema.minor).toBe(2);
+    expect(manifest.bundleId).toBe("demo-v2");
+    expect(manifest.trajectoryState?.orientation.available).toBe(true);
+    expect(manifest.trajectoryState?.gripper.available).toBe(true);
     expect(manifest.dataset.requestedRevision).toBe("v3.0");
     expect(manifest.dataset.resolvedRevision).toMatch(/^[0-9a-f]{40}$/);
     expect(manifest.dataset.requestedRevision).not.toBe(

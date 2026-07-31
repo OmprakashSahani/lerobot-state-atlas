@@ -7,9 +7,9 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
-import coverageJson from "@/public/atlas-data/demo-v1/coverage.json";
-import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
+import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
+import coverageJson from "@/public/atlas-data/demo-v2/coverage.json";
+import trajectoriesJson from "@/public/atlas-data/demo-v2/trajectories.json";
 import HomePage from "@/app/page";
 import MethodologyPage from "@/app/methodology/page";
 import { AtlasViewer } from "@/components/viewer/AtlasViewer";
@@ -35,7 +35,6 @@ import type {
 const manifest = decodeManifest(manifestJson);
 const manifestWithVideos = decodeManifest({
   ...manifestJson,
-  schema: { ...manifestJson.schema, minor: 1 },
   payloads: [
     ...manifestJson.payloads,
     {
@@ -52,7 +51,7 @@ const episodeVideos = decodeEpisodeVideos({
   schema: {
     name: "lerobot-state-atlas.browser-data",
     major: 1,
-    minor: 1,
+    minor: 2,
   },
   defaultCameraId: "top",
   cameras: [
@@ -226,7 +225,7 @@ vi.mock("@/components/viewer/ViewerCanvas", () => ({
 }));
 
 vi.mock("@/lib/data/loadBundle", () => ({
-  episodeVideoAssetUrl: (filename: string) => `/atlas-data/demo-v1/${filename}`,
+  episodeVideoAssetUrl: (filename: string) => `/atlas-data/demo-v2/${filename}`,
   loadEpisodeVideos: vi.fn(async () => episodeVideos),
   loadTrajectories: vi.fn(async () =>
     decodeTrajectories(trajectoriesJson, manifest),
@@ -252,7 +251,7 @@ describe("accessible product content", () => {
 
   it("labels viewer controls and preserves the spacing disclosure", () => {
     render(<AtlasViewer />);
-    expect(screen.getByText("schema v1.0")).toBeVisible();
+    expect(screen.getByText("schema v1.2")).toBeVisible();
     expect(
       screen.getByRole("complementary", {
         name: "Viewer controls and metadata",
@@ -336,8 +335,12 @@ describe("accessible product content", () => {
     expect(screen.getByLabelText("Playback speed")).toBeVisible();
     expect(screen.getByLabelText("Loop playback")).toBeVisible();
     expect(
-      screen.queryByRole("group", { name: "Recorded raw gripper values" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("group", { name: "Recorded raw gripper values" }),
+    ).toBeVisible();
+    expect(currentViewerCanvasProps().orientationEpisode?.episodeId).toBe(0);
+    expect(currentViewerCanvasProps().recordedGripperEpisode?.episodeId).toBe(
+      0,
+    );
   });
 
   it("threads matching required and optional episodes together", async () => {
@@ -445,14 +448,14 @@ describe("accessible product content", () => {
     activeManifest = manifestWithVideos;
     render(<AtlasViewer />);
 
-    expect(screen.getByText("schema v1.1")).toBeVisible();
+    expect(screen.getByText("schema v1.2")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
     const video = await screen.findByLabelText(
       "Top camera synchronized episode video",
     );
     expect(video).toHaveAttribute(
       "src",
-      "/atlas-data/demo-v1/media/episode-0/top.mp4",
+      "/atlas-data/demo-v2/media/episode-0/top.mp4",
     );
     expect(video).not.toHaveAttribute("controls");
     expect(video).toHaveAttribute("playsinline");
@@ -465,7 +468,7 @@ describe("accessible product content", () => {
       screen.getByLabelText("Left wrist camera synchronized episode video"),
     ).toHaveAttribute(
       "src",
-      "/atlas-data/demo-v1/media/episode-0/left.mp4",
+      "/atlas-data/demo-v2/media/episode-0/left.mp4",
     );
 
     fireEvent.change(screen.getByLabelText("Episode"), {
@@ -475,7 +478,7 @@ describe("accessible product content", () => {
       screen.getByLabelText("Left wrist camera synchronized episode video"),
     ).toHaveAttribute(
       "src",
-      "/atlas-data/demo-v1/media/episode-1/left.mp4",
+      "/atlas-data/demo-v2/media/episode-1/left.mp4",
     );
   });
 

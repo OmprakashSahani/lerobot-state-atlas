@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
-import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
+import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
+import trajectoriesJson from "@/public/atlas-data/demo-v2/trajectories.json";
 import {
   decodeManifest,
   decodeTrajectories,
@@ -25,13 +25,31 @@ describe("trajectory playback", () => {
   const manifest = decodeManifest(manifestJson);
 
   it("validates synchronized committed trajectories", () => {
-    const episode = decodeTrajectories(trajectoriesJson, manifest).episodes[0];
-    const sample = selectRecordedPlaybackSample(episode, 2.9);
+    const trajectories = decodeTrajectories(trajectoriesJson, manifest);
+    const episode = trajectories.episodes[0];
+    const orientations =
+      trajectories.orientation.status === "available"
+        ? trajectories.orientation.data.episodes[0]
+        : undefined;
+    const gripper =
+      trajectories.gripper.status === "available"
+        ? trajectories.gripper.data.episodes[0]
+        : undefined;
+    const sample = selectRecordedPlaybackSample(
+      episode,
+      2.9,
+      orientations,
+      gripper,
+    );
     expect(sample.index).toBe(2);
     expect(sample.left.position).toEqual(episode.leftPositionsXyz[2]);
     expect(sample.right.position).toEqual(episode.rightPositionsXyz[2]);
-    expect(sample.left.orientationXyzw).toBeUndefined();
-    expect(sample.left.recordedGripperValue).toBeUndefined();
+    expect(sample.left.orientationXyzw).toEqual(
+      orientations?.leftOrientationsXyzw[2],
+    );
+    expect(sample.left.recordedGripperValue).toBe(
+      gripper?.leftRecordedGripperValues[2],
+    );
   });
 
   it("selects one clamped recorded sample for every state field", () => {

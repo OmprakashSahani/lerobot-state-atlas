@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import manifestJson from "@/public/atlas-data/demo-v1/manifest.json";
-import coverageJson from "@/public/atlas-data/demo-v1/coverage.json";
-import trajectoriesJson from "@/public/atlas-data/demo-v1/trajectories.json";
+import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
+import coverageJson from "@/public/atlas-data/demo-v2/coverage.json";
+import trajectoriesJson from "@/public/atlas-data/demo-v2/trajectories.json";
 import { decodeManifest } from "@/lib/atlas-schema/validate";
 import {
   loadDemoBundle,
@@ -14,7 +14,7 @@ const episodeVideosJson = {
   schema: {
     name: "lerobot-state-atlas.browser-data",
     major: 1,
-    minor: 1,
+    minor: 2,
   },
   defaultCameraId: "top",
   cameras: [
@@ -47,7 +47,6 @@ const episodeVideosJson = {
 function manifestWithEpisodeVideos() {
   return decodeManifest({
     ...manifestJson,
-    schema: { ...manifestJson.schema, minor: 1 },
     payloads: [
       ...manifestJson.payloads,
       {
@@ -82,8 +81,8 @@ describe("bundle loading", () => {
     const bundle = await loadDemoBundle(fetcher, "development");
 
     expect(urls).toEqual([
-      "/atlas-data/demo-v1/manifest.json",
-      "/atlas-data/demo-v1/coverage.json",
+      "/atlas-data/demo-v2/manifest.json",
+      "/atlas-data/demo-v2/coverage.json",
     ]);
     expect(bundle.preparedArms).toHaveLength(2);
     expect(options).toEqual([{ cache: "no-store" }, { cache: "no-store" }]);
@@ -136,10 +135,12 @@ describe("bundle loading", () => {
       "development",
     );
     expect(fetcher).toHaveBeenCalledWith(
-      "/atlas-data/demo-v1/trajectories.json",
+      "/atlas-data/demo-v2/trajectories.json",
       { cache: "no-store" },
     );
     expect(result.episodes.map((episode) => episode.episodeId)).toEqual([0, 1]);
+    expect(result.orientation.status).toBe("available");
+    expect(result.gripper.status).toBe("available");
   });
 
   it("handles a missing optional trajectory payload", async () => {
@@ -162,7 +163,7 @@ describe("bundle loading", () => {
     );
 
     expect(fetcher).toHaveBeenCalledWith(
-      "/atlas-data/demo-v1/episode-videos.json",
+      "/atlas-data/demo-v2/episode-videos.json",
       { cache: "no-store" },
     );
     expect(result.defaultCameraId).toBe("top");
@@ -283,8 +284,8 @@ describe("bundle loading", () => {
 
       expect(videos.defaultCameraId).toBe("top");
       expect(urls).toEqual([
-        "/atlas-data/demo-v1/trajectories.json",
-        "/atlas-data/demo-v1/episode-videos.json",
+        "/atlas-data/demo-v2/trajectories.json",
+        "/atlas-data/demo-v2/episode-videos.json",
       ]);
       expect(urls.some((url) => url.includes("enhanced"))).toBe(false);
     },

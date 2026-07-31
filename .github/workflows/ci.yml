@@ -47,10 +47,15 @@ jobs:
       - name: Check Ruff formatting
         run: uv run ruff format --check .
 
-      - name: Validate browser-data demo
+      - name: Validate immutable browser-data demo-v1
         run: >-
           uv run lerobot-state-atlas validate-browser-data
           apps/web/public/atlas-data/demo-v1
+
+      - name: Validate immutable browser-data demo-v2
+        run: >-
+          uv run lerobot-state-atlas validate-browser-data
+          apps/web/public/atlas-data/demo-v2
 
       - name: Check whitespace
         run: git diff --check
