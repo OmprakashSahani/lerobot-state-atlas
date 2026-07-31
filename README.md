@@ -377,6 +377,8 @@ peak process RSS, per-batch coverage growth, and installed artifact sizes.
 Timings and RSS are machine- and platform-dependent operational evidence. The
 report is not referenced by the manifest, and enabling it does not change the
 deterministic bundle files, payload checksums, or browser-data contract.
+See the [full-dataset scaling evidence](docs/full-dataset-scaling.md) for the
+recorded 100-episode pilot measurements and current scaling gates.
 
 To package synchronized MP4 media into a new schema v1.2 bundle, also provide
 both of these options:
