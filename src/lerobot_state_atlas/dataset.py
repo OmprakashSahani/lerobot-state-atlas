@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 import re
 from typing import Any
 
@@ -23,6 +24,43 @@ def default_dataset_revision() -> str:
     return str(CODEBASE_VERSION)
 
 
+def _resolve_cached_dataset_revision(
+    repo_id: str,
+    requested_revision: str,
+) -> str | None:
+    """Resolve a dataset revision from LeRobot's supported Hub cache."""
+    try:
+        from huggingface_hub import scan_cache_dir
+        from lerobot.utils.constants import HF_LEROBOT_HUB_CACHE
+
+        cache_info = scan_cache_dir(HF_LEROBOT_HUB_CACHE)
+        requested_is_commit = bool(_FULL_COMMIT_SHA.fullmatch(requested_revision))
+        matching_commits: set[str] = set()
+
+        for repository in cache_info.repos:
+            if repository.repo_id != repo_id or repository.repo_type != "dataset":
+                continue
+            for revision in repository.revisions:
+                commit = str(revision.commit_hash)
+                matches_requested_commit = (
+                    requested_is_commit and commit.lower() == requested_revision.lower()
+                )
+                matches_requested_ref = requested_revision in revision.refs
+                if not (matches_requested_commit or matches_requested_ref):
+                    continue
+                if not _FULL_COMMIT_SHA.fullmatch(commit):
+                    continue
+                if not Path(revision.snapshot_path).exists():
+                    continue
+                matching_commits.add(commit.lower())
+    except Exception:
+        return None
+
+    if len(matching_commits) != 1:
+        return None
+    return next(iter(matching_commits))
+
+
 def resolve_dataset_revision(
     repo_id: str,
     requested_revision: str | None = None,
@@ -43,6 +81,12 @@ def resolve_dataset_revision(
     try:
         info = api.dataset_info(repo_id, revision=requested)
     except Exception as error:
+        cached_revision = _resolve_cached_dataset_revision(repo_id, requested)
+        if cached_revision is not None:
+            return DatasetRevision(
+                requested=requested,
+                resolved=cached_revision,
+            )
         raise ValueError(
             f"Unable to resolve dataset revision {requested!r} for {repo_id}."
         ) from error
