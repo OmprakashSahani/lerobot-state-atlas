@@ -12,6 +12,7 @@ import torch
 from lerobot_state_atlas.browser_data.export import (
     SourceProvenance,
     _git_source_provenance,
+    _scene_bounds,
     _trajectory_payload,
     _write_bundle,
     build_browser_data_documents,
@@ -27,6 +28,11 @@ from lerobot_state_atlas.browser_data.validate import (
     validate_browser_data,
 )
 from lerobot_state_atlas.coverage import WorkspaceCoverage
+from lerobot_state_atlas.export_measurement import (
+    ArmCoverageCounts,
+    ExportMeasurementSession,
+    measure_bundle_artifacts,
+)
 from lerobot_state_atlas.schema import DatasetSummary, FeatureSummary
 from lerobot_state_atlas.trajectory import ToolTrajectory
 from lerobot_state_atlas.transforms import RigidTransform, transform_tool_trajectory
@@ -154,6 +160,27 @@ def make_documents() -> tuple[dict, bytes, bytes]:
     return manifest, coverage, trajectory
 
 
+def reference_scene_bounds(
+    coverage_payload: dict,
+    voxel_size: float,
+    voxel_origin_xyz: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> dict:
+    centers = [
+        [
+            voxel_origin_xyz[axis] + index[axis] * voxel_size + voxel_size / 2.0
+            for axis in range(3)
+        ]
+        for arm in coverage_payload["arms"]
+        for index in arm["voxelIndices"]
+    ]
+    if not centers:
+        raise ValueError("Coverage payload contains no voxel centers.")
+    return {
+        "minimumXyz": [min(point[axis] for point in centers) for axis in range(3)],
+        "maximumXyz": [max(point[axis] for point in centers) for axis in range(3)],
+    }
+
+
 def write_documents(
     path: Path,
     manifest: dict,
@@ -251,6 +278,153 @@ def test_deterministic_serialization_and_manifest_generation() -> None:
     assert first[0]["exporter"]["repositoryHeadCommit"] == "b" * 40
     assert first[0]["exporter"]["workingTreeDirty"] is True
     assert "uncommitted" in first[0]["exporter"]["sourceDescription"]
+
+
+@pytest.mark.parametrize(
+    ("arms", "origin"),
+    [
+        ([{"voxelIndices": [[2, 3, 4]]}], (0.0, 0.0, 0.0)),
+        (
+            [
+                {"voxelIndices": [[0, 1, 2], [4, 5, 6]]},
+                {"voxelIndices": [[-2, 8, 1], [7, -3, 9]]},
+            ],
+            (0.0, 0.0, 0.0),
+        ),
+        (
+            [{"voxelIndices": [[-9, 3, -1], [5, -7, 11]]}],
+            (0.0, 0.0, 0.0),
+        ),
+        (
+            [{"voxelIndices": [[-2, 0, 4], [3, 7, -5]]}],
+            (1.25, -0.75, 2.5),
+        ),
+        (
+            [
+                {"voxelIndices": [[0, 0, 0]]},
+                {
+                    "voxelIndices": [
+                        [-12, 4, 1],
+                        [3, 20, -8],
+                        [9, -6, 14],
+                    ]
+                },
+            ],
+            (0.4, -1.2, 0.05),
+        ),
+    ],
+    ids=[
+        "one-arm",
+        "two-arms",
+        "negative-and-positive-indices",
+        "non-zero-origin",
+        "asymmetric-arms",
+    ],
+)
+def test_scene_bounds_match_reference_algorithm(
+    arms: list[dict],
+    origin: tuple[float, float, float],
+) -> None:
+    payload = {"arms": arms}
+
+    assert _scene_bounds(payload, 0.02, origin) == reference_scene_bounds(
+        payload,
+        0.02,
+        origin,
+    )
+
+
+def test_browser_documents_remain_identical_to_reference_scene_bounds(
+    monkeypatch,
+) -> None:
+    optimized = make_documents()
+    monkeypatch.setattr(
+        "lerobot_state_atlas.browser_data.export._scene_bounds",
+        reference_scene_bounds,
+    )
+    reference = make_documents()
+
+    assert deterministic_json_bytes(optimized[0]) == deterministic_json_bytes(
+        reference[0]
+    )
+    assert optimized[1:] == reference[1:]
+
+
+@pytest.mark.parametrize("bundle_name", ["demo-v1", "demo-v2"])
+def test_scene_bounds_match_immutable_public_bundles(bundle_name: str) -> None:
+    bundle = Path(__file__).parents[1] / "apps/web/public/atlas-data" / bundle_name
+    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    coverage = json.loads((bundle / "coverage.json").read_text(encoding="utf-8"))
+
+    assert (
+        _scene_bounds(
+            coverage,
+            manifest["coverage"]["voxelSize"],
+            manifest["coverage"]["voxelOrigin"],
+        )
+        == manifest["sceneBounds"]
+    )
+
+
+def test_measurement_reporting_does_not_change_bundle_bytes_or_checksums(
+    tmp_path: Path,
+) -> None:
+    manifest, coverage, trajectory = make_documents()
+    baseline = tmp_path / "baseline"
+    measured = tmp_path / "measured"
+    report_path = tmp_path / "reports/measurement.json"
+
+    _write_bundle(baseline, manifest, coverage, trajectory)
+    session = ExportMeasurementSession()
+    session.start_export()
+    _write_bundle(
+        measured,
+        manifest,
+        coverage,
+        trajectory,
+        measurement=session,
+    )
+    session.finish_export()
+    artifacts = measure_bundle_artifacts(measured, manifest)
+    report = session.build_report(
+        repository_id="organization/demo",
+        requested_revision="v3.0",
+        resolved_revision="c" * 40,
+        source_episode_count=2,
+        coverage_episode_ids=(0, 1),
+        trajectory_episode_ids=(0,),
+        episode_batch_size=2,
+        voxel_size=0.02,
+        arm_spacing=0.8,
+        selected_frame_count=3,
+        final_arms={
+            "left": ArmCoverageCounts(2, 3, 3),
+            "right": ArmCoverageCounts(2, 3, 3),
+        },
+        trajectory_sample_counts={0: 2},
+        artifacts=artifacts,
+    )
+    session.store_report(report)
+    session.write_report(report_path)
+
+    baseline_files = {
+        path.relative_to(baseline): path.read_bytes()
+        for path in sorted(baseline.rglob("*"))
+        if path.is_file()
+    }
+    measured_files = {
+        path.relative_to(measured): path.read_bytes()
+        for path in sorted(measured.rglob("*"))
+        if path.is_file()
+    }
+    assert measured_files == baseline_files
+    assert report_path.is_file()
+    assert not (measured / "measurement.json").exists()
+    installed_manifest = json.loads((measured / "manifest.json").read_text())
+    assert all(
+        payload["filename"] != report_path.name
+        for payload in installed_manifest["payloads"]
+    )
 
 
 def test_manifest_checksums_csr_and_aggregate_totals(tmp_path: Path) -> None:

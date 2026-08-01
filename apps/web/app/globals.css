@@ -505,16 +505,20 @@ a {
 
 .viewer-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 390px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 350px) minmax(360px, 400px);
   height: calc(100dvh - 68px);
   min-height: 580px;
 }
 
 .viewer-visuals {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
+}
+
+.viewer-visuals--media-open {
+  grid-template-columns: minmax(0, 13fr) minmax(260px, 7fr);
 }
 
 .viewer-stage {
@@ -627,11 +631,65 @@ a {
   text-align: center;
 }
 
+.episode-video-retry {
+  align-self: center;
+  margin-bottom: 1rem;
+}
+
 .viewer-panel {
   background: rgba(9, 23, 34, 0.98);
   border-left: 1px solid var(--line);
   overflow-y: auto;
   padding: 1.4rem;
+}
+
+.episode-analysis-panel {
+  background: rgba(7, 19, 29, 0.99);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: 1.4rem;
+}
+
+.episode-analysis-header {
+  flex: none;
+  padding-bottom: 1.2rem;
+}
+
+.episode-analysis-header .eyebrow {
+  font-size: 0.58rem;
+  margin-bottom: 0.55rem;
+}
+
+.episode-analysis-header h2 {
+  font-size: 1.25rem;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.episode-analysis-panel .uncommon-episodes {
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 1.2rem;
+}
+
+.episode-analysis-context {
+  flex: none;
+}
+
+.episode-analysis-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.35rem;
+  scrollbar-gutter: stable;
+  touch-action: pan-y;
 }
 
 .panel-heading {
@@ -673,6 +731,13 @@ a {
 }
 
 .section-title-row h2 {
+  font-size: 0.69rem;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.episode-analysis-panel .section-title-row h3 {
   font-size: 0.69rem;
   letter-spacing: 0.08em;
   margin: 0;
@@ -747,7 +812,8 @@ a {
 
 .viewer-panel select,
 .viewer-panel input[type="range"],
-.viewer-panel input[type="number"] {
+.viewer-panel input[type="number"],
+.episode-analysis-panel select {
   width: 100%;
 }
 
@@ -756,7 +822,8 @@ a {
 }
 
 .viewer-panel select,
-.viewer-panel input[type="number"] {
+.viewer-panel input[type="number"],
+.episode-analysis-panel select {
   background: #0d2230;
   border: 1px solid var(--line);
   border-radius: 0;
@@ -867,6 +934,16 @@ a {
   margin: 0.7rem 0 0;
 }
 
+.episode-analysis-radius-context {
+  background: #0b1d2a;
+  color: var(--cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  line-height: 1.45;
+  margin: 0.7rem 0 0;
+  padding: 0.6rem;
+}
+
 .uncommon-episode-list {
   display: grid;
   gap: 0.55rem;
@@ -951,6 +1028,18 @@ a {
   gap: 0.35rem;
 }
 
+.playback-primary-actions {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 0.7rem;
+  min-width: 0;
+}
+
+.playback-primary-action {
+  display: block;
+  width: 100%;
+}
+
 .raw-gripper-readout {
   background: #0b1d2a;
   margin-top: 0.45rem;
@@ -995,6 +1084,11 @@ a {
 }
 
 .viewer-panel :focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.episode-analysis-panel :focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
@@ -1177,6 +1271,20 @@ a {
   }
 }
 
+@media (max-width: 1399px) {
+  .viewer-shell {
+    grid-template-columns: minmax(0, 1fr) 390px;
+    grid-template-rows: minmax(580px, calc(100dvh - 68px)) minmax(480px, 70dvh);
+    height: auto;
+  }
+
+  .episode-analysis-panel {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 950px) {
   .hero {
     grid-template-columns: 1fr;
@@ -1192,14 +1300,18 @@ a {
 
   .viewer-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto minmax(480px, 75dvh);
     height: auto;
     min-height: calc(100dvh - 68px);
   }
 
   .viewer-visuals {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(390px, 58dvh) minmax(220px, auto);
+    grid-template-rows: minmax(390px, 58dvh);
+  }
+
+  .viewer-visuals--media-open {
+    grid-template-rows: minmax(390px, 58dvh) minmax(220px, 42dvh);
   }
 
   .episode-video-panel {
@@ -1213,6 +1325,10 @@ a {
     border-top: 1px solid var(--line);
     max-height: none;
     overflow: visible;
+  }
+
+  .episode-analysis-panel {
+    grid-column: auto;
   }
 }
 
@@ -1288,14 +1404,22 @@ a {
   }
 
   .viewer-shell {
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto minmax(440px, 75dvh);
   }
 
   .viewer-visuals {
-    grid-template-rows: 52dvh minmax(210px, auto);
+    grid-template-rows: 52dvh;
+  }
+
+  .viewer-visuals--media-open {
+    grid-template-rows: 52dvh minmax(210px, 42dvh);
   }
 
   .scene-help {
     display: none;
+  }
+
+  .episode-analysis-panel {
+    padding: 1rem;
   }
 }

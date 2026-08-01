@@ -9,6 +9,7 @@ from click.testing import Result
 from typer.testing import CliRunner
 
 from lerobot_state_atlas.cli import app
+from lerobot_state_atlas.export_measurement import ArmCoverageCounts
 from lerobot_state_atlas.interactive import (
     InteractiveWorkspaceHeatmap,
 )
@@ -106,6 +107,7 @@ def test_export_browser_data_help_includes_optional_inputs() -> None:
     assert "--dataset-revision" in option_names
     assert "--episode-video-metadata" in option_names
     assert "--episode-video-media-root" in option_names
+    assert "--measurement-report" in option_names
 
 
 def test_export_browser_data_forwards_episode_video_inputs(
@@ -192,6 +194,203 @@ def test_export_browser_data_forwards_episode_video_inputs(
     assert calls["episode_video_media"] == {
         "media/episode-000000/top.mp4": media_path.resolve()
     }
+    assert "measurement" not in calls
+    assert "Measured coverage batch" not in plain_output(result)
+
+
+@pytest.mark.parametrize(
+    "report_relative_path",
+    [
+        "bundle/measurement.json",
+        "bundle/nested/reports/measurement.json",
+    ],
+)
+def test_export_browser_data_rejects_measurement_report_inside_bundle(
+    monkeypatch,
+    tmp_path: Path,
+    report_relative_path: str,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text("<robot name='test'/>", encoding="utf-8")
+    identity_path = tmp_path / "UPSTREAM_COMMIT"
+    identity_path.write_text("upstream-commit\n", encoding="utf-8")
+    called = False
+
+    def fake_export(*args, **kwargs):
+        nonlocal called
+        called = True
+        del args, kwargs
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.export_browser_data",
+        fake_export,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export-browser-data",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--urdf-upstream-identity",
+            str(identity_path),
+            "--episode-end",
+            "0",
+            "--bundle-id",
+            "test-v1",
+            "--output",
+            str(tmp_path / "bundle"),
+            "--measurement-report",
+            str(tmp_path / report_relative_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "outsidethebrowser-databundle" in compact_output(plain_output(result))
+    assert called is False
+
+
+def test_export_browser_data_accepts_atomic_sibling_measurement_report(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text("<robot name='test'/>", encoding="utf-8")
+    identity_path = tmp_path / "UPSTREAM_COMMIT"
+    identity_path.write_text("upstream-commit\n", encoding="utf-8")
+    report_path = tmp_path / "reports/measurement.json"
+
+    def fake_export(repo_id: str, **kwargs):
+        assert repo_id == "DreamMachines/example"
+        measurement = kwargs["measurement"]
+        started_at = measurement.begin_coverage_batch()
+        measurement.complete_coverage_batch(
+            started_at=started_at,
+            episode_ids=(0,),
+            frame_count=5,
+            cumulative_frame_count=5,
+            arms={
+                "left": ArmCoverageCounts(2, 3, 5),
+                "right": ArmCoverageCounts(1, 2, 5),
+            },
+        )
+        measurement.store_report(
+            {
+                "reportFormat": {
+                    "name": "lerobot-state-atlas.export-measurement",
+                    "version": 1,
+                }
+            }
+        )
+        return SimpleNamespace(
+            output_path=tmp_path / "bundle",
+            dataset_frame_count=1,
+            tool_point_visit_count=2,
+            arm_voxel_entry_count=1,
+            unique_shared_grid_cell_count=1,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.export_browser_data",
+        fake_export,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export-browser-data",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--urdf-upstream-identity",
+            str(identity_path),
+            "--episode-end",
+            "0",
+            "--bundle-id",
+            "test-v1",
+            "--output",
+            str(tmp_path / "bundle"),
+            "--measurement-report",
+            str(report_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(report_path.read_text(encoding="utf-8")) == {
+        "reportFormat": {
+            "name": "lerobot-state-atlas.export-measurement",
+            "version": 1,
+        }
+    }
+    output = plain_output(result)
+    assert "Measured coverage batch 1" in output
+    assert "1 episodes, 5 frames" in output
+    assert "3 occupied entries" in output
+    assert "5CSRincidences" in compact_output(output)
+
+
+def test_measurement_report_write_failure_is_clear_after_export(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text("<robot name='test'/>", encoding="utf-8")
+    identity_path = tmp_path / "UPSTREAM_COMMIT"
+    identity_path.write_text("upstream-commit\n", encoding="utf-8")
+    bundle = tmp_path / "bundle"
+
+    def fake_export(*args, **kwargs):
+        del args
+        bundle.mkdir()
+        kwargs["measurement"].store_report({"reportFormat": {"version": 1}})
+        return SimpleNamespace(
+            output_path=bundle,
+            dataset_frame_count=1,
+            tool_point_visit_count=2,
+            arm_voxel_entry_count=1,
+            unique_shared_grid_cell_count=1,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.cli.export_browser_data",
+        fake_export,
+    )
+
+    def fail_report(*args, **kwargs):
+        del args, kwargs
+        raise OSError("write failed")
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.export_measurement.ExportMeasurementSession.write_report",
+        fail_report,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export-browser-data",
+            "DreamMachines/example",
+            "--urdf",
+            str(urdf_path),
+            "--urdf-upstream-identity",
+            str(identity_path),
+            "--episode-end",
+            "0",
+            "--bundle-id",
+            "test-v1",
+            "--output",
+            str(bundle),
+            "--measurement-report",
+            str(tmp_path / "measurement.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert bundle.is_dir()
+    assert "bundlewasinstalled" in compact_output(plain_output(result))
+    assert "reportcouldnotbewritten" in compact_output(plain_output(result))
+    assert not (tmp_path / "measurement.json").exists()
 
 
 def test_export_browser_data_requires_both_video_options(

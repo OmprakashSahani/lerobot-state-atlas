@@ -9,7 +9,16 @@ import {
 } from "react";
 
 import type { AtlasData } from "@/lib/atlas-schema/types";
-import { loadDemoBundle } from "@/lib/data/loadBundle";
+import {
+  benchmarksEnabled,
+  publishBrowserBenchmarkIfEnabled,
+  runAtlasBrowserBenchmark,
+} from "@/lib/data/browserBenchmark";
+import {
+  loadDemoBundle,
+  loadDemoBundleForBenchmark,
+  resolveBundleBase,
+} from "@/lib/data/loadBundle";
 
 type AtlasDataState =
   | { status: "loading" }
@@ -23,7 +32,30 @@ export function AtlasDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    loadDemoBundle()
+    const loadBenchmarkedBundle = () => {
+      const bundleBase = resolveBundleBase();
+      return publishBrowserBenchmarkIfEnabled(
+        true,
+        bundleBase,
+        window,
+        async () => {
+          const startedAt = new Date();
+          const result = await loadDemoBundleForBenchmark();
+          return {
+            data: result.data,
+            report: runAtlasBrowserBenchmark(result.data, {
+              bundleBase,
+              loadDurations: result.durations,
+              startedAtUtc: startedAt.toISOString(),
+            }),
+          };
+        },
+      )!;
+    };
+    const request = benchmarksEnabled()
+      ? Promise.resolve().then(loadBenchmarkedBundle)
+      : loadDemoBundle();
+    request
       .then((data) => {
         if (active) setState({ status: "ready", data });
       })

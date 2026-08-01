@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
-  CoveragePayload,
   EpisodeVideoPayload,
   TrajectoryPayload,
 } from "@/lib/atlas-schema/types";
@@ -13,11 +12,8 @@ import {
   loadEpisodeVideos,
   loadTrajectories,
 } from "@/lib/data/loadBundle";
-import {
-  queryRadius,
-  type VoxelSelection,
-} from "@/lib/data/radiusQuery";
-import { scoreUncommonEpisodes } from "@/lib/data/uncommonEpisodes";
+import { formatEpisodeSelection } from "@/lib/data/episodeSelection";
+import { queryRadius } from "@/lib/data/radiusQuery";
 import {
   advancePlayback,
   episodeVideoTime,
@@ -27,14 +23,12 @@ import {
   type PlaybackState,
 } from "@/lib/playback/controller";
 import { ViewerCanvas } from "./ViewerCanvas";
+import {
+  EpisodeAnalysisPanel,
+  type TrajectoryState,
+} from "./EpisodeAnalysisPanel";
 import { useAtlasData } from "./AtlasDataProvider";
 import { useViewerStore } from "./ViewerStore";
-
-type TrajectoryState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready"; data: TrajectoryPayload };
 
 type EpisodeVideoState =
   | { status: "idle" }
@@ -55,213 +49,6 @@ function formatMetric(value: number, metric: CoverageMetric) {
   return metric === "log-visits" ? value.toFixed(2) : value.toLocaleString();
 }
 
-function UncommonEpisodesSection({
-  coverage,
-  episodeCount,
-  episodeIds,
-  radiusResult,
-  selection,
-  trajectories,
-  onCheckPlayback,
-  onOpenPlayback,
-}: {
-  coverage: CoveragePayload;
-  episodeCount: number;
-  episodeIds: readonly number[];
-  radiusResult: ReturnType<typeof queryRadius> | null;
-  selection: VoxelSelection | null;
-  trajectories: TrajectoryState;
-  onCheckPlayback: () => void;
-  onOpenPlayback: (episodeId: number) => void;
-}) {
-  const [radiusScopeSelection, setRadiusScopeSelection] =
-    useState<VoxelSelection | null>(null);
-  const usesRadiusScope =
-    selection !== null && radiusScopeSelection === selection;
-
-  const radiusMatches = radiusResult?.matches ?? [];
-  const radiusScopeKey = radiusMatches
-    .map((match) => `${match.arm}:${match.voxelEntryIndex}`)
-    .join("|");
-  const scores = useMemo(
-    () =>
-      scoreUncommonEpisodes({
-        coverage,
-        episodeCount,
-        allowedEpisodeIds: episodeIds,
-        scope:
-          usesRadiusScope ? radiusMatches : undefined,
-      }),
-    // Entry identities fully determine local scores; geometry-only query changes
-    // with the same matches must not repeat the CSR traversal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      coverage,
-      episodeCount,
-      episodeIds,
-      radiusScopeKey,
-      usesRadiusScope,
-    ],
-  );
-  const scopeLabel = usesRadiusScope ? "selected radius" : "entire coverage";
-  const availableEpisodeIds = useMemo(
-    () =>
-      trajectories.status === "ready"
-        ? new Set(trajectories.data.episodes.map((episode) => episode.episodeId))
-        : null,
-    [trajectories],
-  );
-
-  return (
-    <section
-      className="control-section uncommon-episodes"
-      aria-labelledby="uncommon-episodes-heading"
-    >
-      <div className="section-title-row">
-        <h2 id="uncommon-episodes-heading">Uncommon-space episodes</h2>
-        <span>{usesRadiusScope ? "Local" : "Global"}</span>
-      </div>
-      <p className="control-help uncommon-disclosure">
-        Scores use distinct-episode frequency across arm-specific voxel entries.
-        Higher scores mean an episode reached entries shared with fewer exported
-        coverage episodes. Raw visit counts are a separate metric.
-      </p>
-      <p className="control-help uncommon-disclosure">
-        Scores describe only this exported coverage set, not the full dataset or
-        physical workspace generally. A score is not a probability, percentile,
-        task-quality judgment, or anomaly label.
-      </p>
-      <label className="field-label" htmlFor="uncommon-episode-scope">
-        Episode scoring scope
-      </label>
-      <select
-        id="uncommon-episode-scope"
-        value={usesRadiusScope ? "radius" : "coverage"}
-        onChange={(event) =>
-          setRadiusScopeSelection(
-            event.target.value === "radius" ? selection : null,
-          )
-        }
-      >
-        <option value="coverage">Entire coverage</option>
-        <option value="radius" disabled={selection === null}>
-          Selected radius
-        </option>
-      </select>
-      {selection === null ? (
-        <small className="control-help">
-          Select an occupied voxel to score episodes within a radius.
-        </small>
-      ) : null}
-      {episodeCount === 1 ? (
-        <p className="uncommon-special-state" role="note">
-          Relative uncommonness is unavailable with one coverage episode;
-          scores are defined as zero.
-        </p>
-      ) : null}
-      <p
-        className="uncommon-result-summary"
-        aria-atomic="true"
-        aria-live="polite"
-      >
-        {scores.length} {scores.length === 1 ? "episode" : "episodes"} ranked
-        for {scopeLabel}.
-      </p>
-      {trajectories.status === "idle" ? (
-        <button
-          className="compact-button uncommon-playback-check"
-          type="button"
-          onClick={onCheckPlayback}
-        >
-          Check playback availability
-        </button>
-      ) : null}
-      {trajectories.status === "loading" ? (
-        <p className="uncommon-playback-state" aria-busy="true">
-          Checking playback availability…
-        </p>
-      ) : null}
-      {trajectories.status === "error" ? (
-        <button
-          className="compact-button uncommon-playback-check"
-          type="button"
-          onClick={onCheckPlayback}
-        >
-          Retry playback availability
-        </button>
-      ) : null}
-      {scores.length === 0 && usesRadiusScope ? (
-        <p className="uncommon-special-state">
-          No episode evidence exists in the current radius.
-        </p>
-      ) : (
-        <ol
-          className="uncommon-episode-list"
-          aria-label={`Uncommon-space episode ranking for ${scopeLabel}`}
-        >
-          {scores.map((result) => (
-            <li key={result.episodeId}>
-              <div className="uncommon-episode-heading">
-                <strong>Episode {result.episodeId}</strong>
-                <span>
-                  Uncommonness {(result.score * 100).toFixed(1)} / 100
-                </span>
-              </div>
-              <dl>
-                <div>
-                  <dt>Arm-specific entries touched</dt>
-                  <dd>{result.touchedEntryCount.toLocaleString()}</dd>
-                </div>
-                <div>
-                  <dt>Scoped entries touched</dt>
-                  <dd>{(result.scopeEntryShare * 100).toFixed(1)}%</dd>
-                </div>
-                <div>
-                  <dt>Distinct episodes represented</dt>
-                  <dd>
-                    {result.minimumDistinctEpisodeCount}–
-                    {result.maximumDistinctEpisodeCount} per entry
-                  </dd>
-                </div>
-              </dl>
-              <div className="uncommon-playback-availability">
-                {trajectories.status === "idle" ? (
-                  <p>Playback availability not loaded.</p>
-                ) : null}
-                {trajectories.status === "loading" ? (
-                  <p>Playback availability loading.</p>
-                ) : null}
-                {trajectories.status === "error" ? (
-                  <p>Playback availability could not be loaded.</p>
-                ) : null}
-                {availableEpisodeIds?.has(result.episodeId) ? (
-                  <>
-                    <p id={`episode-${result.episodeId}-playback-status`}>
-                      Playback available
-                    </p>
-                    <button
-                      aria-describedby={`episode-${result.episodeId}-playback-status`}
-                      className="compact-button"
-                      type="button"
-                      onClick={() => onOpenPlayback(result.episodeId)}
-                    >
-                      Open Episode {result.episodeId} playback
-                    </button>
-                  </>
-                ) : null}
-                {availableEpisodeIds !== null &&
-                !availableEpisodeIds.has(result.episodeId) ? (
-                  <p>Coverage evidence only — trajectory not exported.</p>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  );
-}
-
 export function AtlasViewer() {
   const atlas = useAtlasData();
   const viewer = useViewerStore();
@@ -272,6 +59,7 @@ export function AtlasViewer() {
   const [episodeVideos, setEpisodeVideos] = useState<EpisodeVideoState>({
     status: "idle",
   });
+  const [mediaOpen, setMediaOpen] = useState(false);
   const [cameraId, setCameraId] = useState<string | null>(null);
   const [playback, setPlayback] = useState<PlaybackState>({
     frame: 0,
@@ -281,11 +69,13 @@ export function AtlasViewer() {
   });
   const previousTime = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaToggleRef = useRef<HTMLButtonElement>(null);
   const previousVideoSource = useRef<string | null>(null);
   const spacingInputRef = useRef<HTMLInputElement>(null);
   const episodeSelectorRef = useRef<HTMLSelectElement>(null);
   const playbackSectionRef = useRef<HTMLElement>(null);
   const trajectoryLoadRef = useRef<Promise<TrajectoryPayload> | null>(null);
+  const episodeVideoLoadRef = useRef<Promise<EpisodeVideoPayload> | null>(null);
   const requestedEpisodeIdRef = useRef<number | null>(null);
   const [playbackFocusToken, setPlaybackFocusToken] = useState(0);
 
@@ -340,27 +130,6 @@ export function AtlasViewer() {
           data,
           requestedEpisode === null ? undefined : requestedEpisode,
         );
-        if (
-          atlas.data.manifest.payloads.some(
-            (payload) => payload.kind === "episode-videos",
-          )
-        ) {
-          setEpisodeVideos({ status: "loading" });
-          loadEpisodeVideos(atlas.data.manifest)
-            .then((videoData) => {
-              setEpisodeVideos({ status: "ready", data: videoData });
-              setCameraId(videoData.defaultCameraId);
-            })
-            .catch((error: unknown) =>
-              setEpisodeVideos({
-                status: "error",
-                message:
-                  error instanceof Error
-                    ? error.message
-                    : "Synchronized episode video failed to load.",
-              }),
-            );
-        }
       },
       (error: unknown) => {
         trajectoryLoadRef.current = null;
@@ -371,6 +140,44 @@ export function AtlasViewer() {
         });
       },
     );
+  };
+
+  const loadEpisodeVideoMetadata = () => {
+    if (atlas.status !== "ready") return;
+    if (episodeVideos.status === "ready") return;
+    if (episodeVideoLoadRef.current !== null) return;
+    setEpisodeVideos({ status: "loading" });
+    const request = loadEpisodeVideos(atlas.data.manifest);
+    episodeVideoLoadRef.current = request;
+    request.then(
+      (videoData) => {
+        episodeVideoLoadRef.current = null;
+        setEpisodeVideos({ status: "ready", data: videoData });
+        setCameraId((current) => current ?? videoData.defaultCameraId);
+      },
+      (error: unknown) => {
+        episodeVideoLoadRef.current = null;
+        setEpisodeVideos({
+          status: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Synchronized episode video failed to load.",
+        });
+      },
+    );
+  };
+
+  const openMedia = () => {
+    setMediaOpen(true);
+    if (hasEpisodeVideos && episodeVideos.status === "idle") {
+      loadEpisodeVideoMetadata();
+    }
+  };
+
+  const closeMedia = () => {
+    setMediaOpen(false);
+    window.requestAnimationFrame(() => mediaToggleRef.current?.focus());
   };
 
   const episode =
@@ -473,7 +280,14 @@ export function AtlasViewer() {
     } catch {
       // Media support and autoplay failures must not break trajectory controls.
     }
-  }, [episode, playback.frame, playback.playing, playback.speed, videoSource]);
+  }, [
+    episode,
+    mediaOpen,
+    playback.frame,
+    playback.playing,
+    playback.speed,
+    videoSource,
+  ]);
 
   if (atlas.status === "loading") {
     return <div className="viewer-status" role="status">Loading pinned atlas data…</div>;
@@ -490,6 +304,9 @@ export function AtlasViewer() {
   }
 
   const { manifest, preparedArms, coverage } = atlas.data;
+  const hasEpisodeVideos = manifest.payloads.some(
+    (payload) => payload.kind === "episode-videos",
+  );
   const domain = metricDomain(preparedArms, viewer.metric);
   const radiusResult = viewer.selection
     ? queryRadius(
@@ -514,6 +331,10 @@ export function AtlasViewer() {
         selectedCoverage.episodeIdOffsets[viewer.selection.voxelEntryIndex]
       : 0;
   const frameIndex = recordedSample?.index ?? 0;
+  const episodeSelectionLabel = formatEpisodeSelection(
+    manifest.dataset.episodeIds,
+    manifest.dataset.episodeCount,
+  );
 
   const commitSpacingInput = () => {
     const input = spacingInputRef.current;
@@ -536,7 +357,10 @@ export function AtlasViewer() {
 
   return (
     <div className="viewer-shell">
-      <div className="viewer-visuals">
+      <div
+        className={`viewer-visuals${mediaOpen ? " viewer-visuals--media-open" : ""}`}
+        data-testid="viewer-visuals"
+      >
         <section className="viewer-stage" aria-label="Interactive workspace scene">
           <ViewerCanvas
             data={atlas.data}
@@ -548,7 +372,16 @@ export function AtlasViewer() {
           <div className="scene-badge"><span className="live-dot" aria-hidden="true" />Canonical shared world</div>
           <p className="scene-help">Click a voxel to query · Drag to orbit · Scroll to zoom</p>
         </section>
-        <section className="episode-video-panel" aria-labelledby="episode-video-heading">
+        {mediaOpen ? (
+        <section
+          aria-label="Synchronized media"
+          className="episode-video-panel"
+          id="synchronized-media-panel"
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") closeMedia();
+          }}
+        >
           <div className="episode-video-heading">
             <div>
               <p className="eyebrow">Synchronized media</p>
@@ -556,7 +389,7 @@ export function AtlasViewer() {
             </div>
             {episodeVideos.status === "ready" &&
             episodeVideos.data.cameras.length > 1 ? (
-              <div>
+              <div className="episode-video-camera">
                 <label htmlFor="video-camera">Camera</label>
                 <select
                   id="video-camera"
@@ -572,38 +405,45 @@ export function AtlasViewer() {
               </div>
             ) : null}
           </div>
-          {!manifest.payloads.some(
-            (payload) => payload.kind === "episode-videos",
-          ) ? (
+          {!hasEpisodeVideos ? (
             <p className="episode-video-message" role="note">
-              Synchronized episode video is not included in this bundle.
+              Synchronized media is not included in this bundle.
             </p>
           ) : null}
-          {episodeVideos.status === "idle" &&
-          manifest.payloads.some(
-            (payload) => payload.kind === "episode-videos",
-          ) ? (
-            <p className="episode-video-message">
-              Video metadata loads when trajectory playback is activated.
-            </p>
-          ) : null}
-          {episodeVideos.status === "loading" ? (
+          {hasEpisodeVideos && episodeVideos.status === "loading" ? (
             <p className="episode-video-message" role="status">
               Loading synchronized video metadata…
             </p>
           ) : null}
-          {episodeVideos.status === "error" ? (
+          {hasEpisodeVideos && episodeVideos.status === "error" ? (
             <p className="episode-video-message" role="note">
               Synchronized episode video is unavailable. {episodeVideos.message}
             </p>
           ) : null}
-          {episodeVideos.status === "ready" && !videoSource ? (
+          {hasEpisodeVideos && episodeVideos.status === "error" ? (
+            <button
+              className="compact-button episode-video-retry"
+              onClick={loadEpisodeVideoMetadata}
+              type="button"
+            >
+              Retry synchronized media
+            </button>
+          ) : null}
+          {hasEpisodeVideos && episodeVideos.status === "ready" && !episode ? (
+            <p className="episode-video-message" role="note">
+              Load trajectory playback to select synchronized episode media.
+            </p>
+          ) : null}
+          {hasEpisodeVideos &&
+          episodeVideos.status === "ready" &&
+          episode &&
+          !videoSource ? (
             <p className="episode-video-message" role="note">
               No synchronized {videoCamera?.label.toLowerCase() ?? "camera"} video
               is available for this episode.
             </p>
           ) : null}
-          {videoSource && videoCamera ? (
+          {hasEpisodeVideos && videoSource && videoCamera ? (
             <video
               aria-label={`${videoCamera.label} synchronized episode video`}
               key={videoSource.filename}
@@ -614,10 +454,11 @@ export function AtlasViewer() {
             />
           ) : null}
         </section>
+        ) : null}
       </div>
       <aside className="viewer-panel" aria-label="Viewer controls and metadata">
         <div className="panel-heading">
-          <div><p className="eyebrow">Demo / episodes 0–9</p><h1>Workspace coverage</h1></div>
+          <div><p className="eyebrow">{manifest.bundleId} / {episodeSelectionLabel}</p><h1>Workspace coverage</h1></div>
           <span className="schema-chip">
             schema v{manifest.schema.major}.{manifest.schema.minor}
           </span>
@@ -740,20 +581,31 @@ export function AtlasViewer() {
           ) : <p className="control-help">Select an occupied voxel in the scene.</p>}
         </section>
 
-        <UncommonEpisodesSection
-          coverage={coverage}
-          episodeCount={manifest.dataset.episodeCount}
-          episodeIds={manifest.dataset.episodeIds}
-          radiusResult={radiusResult}
-          selection={viewer.selection}
-          trajectories={trajectories}
-          onCheckPlayback={() => activatePlayback()}
-          onOpenPlayback={activatePlayback}
-        />
-
         <section className="control-section" aria-labelledby="playback-heading" ref={playbackSectionRef}>
           <div className="section-title-row"><h2 id="playback-heading">Trajectory playback</h2><span>Optional payload</span></div>
-          {trajectories.status === "idle" ? <button className="compact-button" type="button" onClick={() => activatePlayback()}>Load playback</button> : null}
+          <div className="playback-primary-actions">
+            <button
+              aria-controls="synchronized-media-panel"
+              aria-expanded={mediaOpen}
+              className="compact-button playback-primary-action"
+              onClick={mediaOpen ? closeMedia : openMedia}
+              ref={mediaToggleRef}
+              type="button"
+            >
+              {mediaOpen
+                ? "Close synchronized media"
+                : "Open synchronized media"}
+            </button>
+            {trajectories.status === "idle" ? (
+              <button
+                className="compact-button playback-primary-action"
+                type="button"
+                onClick={() => activatePlayback()}
+              >
+                Load playback
+              </button>
+            ) : null}
+          </div>
           {trajectories.status === "loading" ? <p role="status">Loading trajectories…</p> : null}
           {trajectories.status === "error" ? <p role="alert">{trajectories.message}</p> : null}
           {trajectories.status === "ready" && episode ? (
@@ -832,6 +684,16 @@ export function AtlasViewer() {
         {manifest.exporter.workingTreeDirty ? <div className="source-warning" role="note"><strong>Uncommitted exporter source</strong><p>{manifest.exporter.sourceDescription}</p></div> : null}
         <div className="spacing-warning" role="note"><strong>Provisional geometry</strong><p>{manifest.coverage.spacingDisclosure}</p></div>
       </aside>
+      <EpisodeAnalysisPanel
+        coverage={coverage}
+        episodeCount={manifest.dataset.episodeCount}
+        episodeIds={manifest.dataset.episodeIds}
+        radiusResult={radiusResult}
+        selection={viewer.selection}
+        trajectories={trajectories}
+        onCheckPlayback={() => activatePlayback()}
+        onOpenPlayback={activatePlayback}
+      />
     </div>
   );
 }

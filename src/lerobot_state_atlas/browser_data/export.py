@@ -1,6 +1,7 @@
 """Deterministic, atomic browser-data v1 exporter."""
 
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 import importlib.metadata
 import json
@@ -35,6 +36,11 @@ from lerobot_state_atlas.browser_data.validate import validate_browser_data
 from lerobot_state_atlas.dataset import (
     load_dataset_summary,
     resolve_dataset_revision,
+)
+from lerobot_state_atlas.export_measurement import (
+    ArmCoverageCounts,
+    ExportMeasurementSession,
+    measure_bundle_artifacts,
 )
 from lerobot_state_atlas.schema import DatasetSummary
 from lerobot_state_atlas.orientation import (
@@ -237,24 +243,35 @@ def _trajectory_payload(
     return {"schema": _schema_reference(), "episodes": episodes}
 
 
-def _scene_bounds(coverage_payload: Mapping[str, Any], voxel_size: float) -> dict:
-    centers: list[list[float]] = []
+def _scene_bounds(
+    coverage_payload: Mapping[str, Any],
+    voxel_size: float,
+    voxel_origin_xyz: Sequence[float] = (0.0, 0.0, 0.0),
+) -> dict:
+    minimum_indices: list[int] | None = None
+    maximum_indices: list[int] | None = None
     for arm in coverage_payload["arms"]:
-        centers.extend(
-            [
-                [
-                    index[0] * voxel_size + voxel_size / 2.0,
-                    index[1] * voxel_size + voxel_size / 2.0,
-                    index[2] * voxel_size + voxel_size / 2.0,
-                ]
-                for index in arm["voxelIndices"]
-            ]
-        )
-    if not centers:
+        for index in arm["voxelIndices"]:
+            if minimum_indices is None or maximum_indices is None:
+                minimum_indices = list(index)
+                maximum_indices = list(index)
+                continue
+            for axis in range(3):
+                minimum_indices[axis] = min(minimum_indices[axis], index[axis])
+                maximum_indices[axis] = max(maximum_indices[axis], index[axis])
+
+    if minimum_indices is None or maximum_indices is None:
         raise ValueError("Coverage payload contains no voxel centers.")
+
+    def center(indices: Sequence[int]) -> list[float]:
+        return [
+            voxel_origin_xyz[axis] + indices[axis] * voxel_size + voxel_size / 2.0
+            for axis in range(3)
+        ]
+
     return {
-        "minimumXyz": [min(point[axis] for point in centers) for axis in range(3)],
-        "maximumXyz": [max(point[axis] for point in centers) for axis in range(3)],
+        "minimumXyz": center(minimum_indices),
+        "maximumXyz": center(maximum_indices),
     }
 
 
@@ -503,6 +520,8 @@ def _write_bundle(
     trajectory_bytes: bytes | None,
     episode_video_bytes: bytes | None = None,
     episode_video_media: Mapping[str, str | Path] | None = None,
+    *,
+    measurement: ExportMeasurementSession | None = None,
 ) -> BrowserDataExport:
     destination = destination.resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -515,6 +534,9 @@ def _write_bundle(
     backup_path: Path | None = None
 
     try:
+        writing_started_at = (
+            measurement.timer_started() if measurement is not None else None
+        )
         (temporary_path / COVERAGE_FILENAME).write_bytes(coverage_bytes)
         if trajectory_bytes is not None:
             (temporary_path / TRAJECTORY_FILENAME).write_bytes(trajectory_bytes)
@@ -548,8 +570,18 @@ def _write_bundle(
         (temporary_path / MANIFEST_FILENAME).write_bytes(
             deterministic_json_bytes(manifest)
         )
-        validate_browser_data(temporary_path)
+        if measurement is not None and writing_started_at is not None:
+            measurement.add_elapsed("bundleWritingInstall", writing_started_at)
 
+        if measurement is None:
+            validate_browser_data(temporary_path)
+        else:
+            with measurement.stage("bundleValidation"):
+                validate_browser_data(temporary_path)
+
+        install_started_at = (
+            measurement.timer_started() if measurement is not None else None
+        )
         if destination.exists():
             backup_path = destination.with_name(
                 f".{destination.name}.previous-{uuid4().hex}"
@@ -565,6 +597,8 @@ def _write_bundle(
         if backup_path is not None:
             shutil.rmtree(backup_path)
             backup_path = None
+        if measurement is not None and install_started_at is not None:
+            measurement.add_elapsed("bundleWritingInstall", install_started_at)
     except BaseException:
         shutil.rmtree(temporary_path, ignore_errors=True)
         if backup_path is not None and not destination.exists():
@@ -601,6 +635,7 @@ def export_browser_data(
     dataset_revision: str | None = None,
     episode_video_payload: Mapping[str, Any] | None = None,
     episode_video_media: Mapping[str, str | Path] | None = None,
+    measurement: ExportMeasurementSession | None = None,
 ) -> BrowserDataExport:
     """Generate, validate, and atomically install a browser-data bundle."""
     normalized_episodes = tuple(episodes)
@@ -616,78 +651,112 @@ def export_browser_data(
     if not set(normalized_trajectory_episodes).issubset(normalized_episodes):
         raise ValueError("Trajectory episodes must be included in coverage episodes.")
 
-    resolved_dataset_revision = resolve_dataset_revision(
-        repo_id,
-        dataset_revision,
-    )
-    summary = load_dataset_summary(
-        repo_id,
-        requested_revision=resolved_dataset_revision.requested,
-        resolved_revision=resolved_dataset_revision.resolved,
-    )
+    if measurement is not None:
+        measurement.start_export()
+
+    with (
+        measurement.stage("sourcePreparation")
+        if measurement is not None
+        else nullcontext()
+    ):
+        resolved_dataset_revision = resolve_dataset_revision(
+            repo_id,
+            dataset_revision,
+        )
+        summary = load_dataset_summary(
+            repo_id,
+            requested_revision=resolved_dataset_revision.requested,
+            resolved_revision=resolved_dataset_revision.resolved,
+        )
     if normalized_episodes[-1] >= summary.total_episodes:
         raise ValueError("Selected episode exceeds the dataset episode count.")
     component_names = _state_component_names(summary)
-    model = load_robot_model(urdf_path)
-    transforms = _arm_transforms(arm_spacing)
-    aggregation = aggregate_workspace_coverages(
-        repo_id,
-        normalized_episodes,
-        component_names=component_names,
-        model=model,
-        voxel_size=voxel_size,
-        episode_batch_size=episode_batch_size,
-        arm_transforms=transforms,
-        revision=resolved_dataset_revision.resolved,
-    )
+    with (
+        measurement.stage("robotModelPreparation")
+        if measurement is not None
+        else nullcontext()
+    ):
+        model = load_robot_model(urdf_path)
+        transforms = _arm_transforms(arm_spacing)
+
+    aggregation_kwargs = {
+        "component_names": component_names,
+        "model": model,
+        "voxel_size": voxel_size,
+        "episode_batch_size": episode_batch_size,
+        "arm_transforms": transforms,
+        "revision": resolved_dataset_revision.resolved,
+    }
+    with (
+        measurement.stage("coverageAggregation")
+        if measurement is not None
+        else nullcontext()
+    ):
+        aggregation = aggregate_workspace_coverages(
+            repo_id,
+            normalized_episodes,
+            **({} if measurement is None else {"measurement": measurement}),
+            **aggregation_kwargs,
+        )
 
     trajectory_document: Mapping[str, Any] | None = None
     if normalized_trajectory_episodes:
-        batch = load_state_batch(
-            repo_id,
-            normalized_trajectory_episodes,
-            revision=resolved_dataset_revision.resolved,
-        )
-        trajectories = {}
-        for arm in ("left", "right"):
-            local = compute_tool_trajectory(
-                batch.states,
-                component_names,
-                model,
-                build_trlc_dk1_joint_component_map(arm),
-                arm=arm,
-                episode_indices=batch.episode_indices,
-                gripper_component_name=build_trlc_dk1_gripper_component_name(arm),
+        with (
+            measurement.stage("trajectoryGeneration")
+            if measurement is not None
+            else nullcontext()
+        ):
+            batch = load_state_batch(
+                repo_id,
+                normalized_trajectory_episodes,
+                revision=resolved_dataset_revision.resolved,
             )
-            trajectories[arm] = transform_tool_trajectory(local, transforms[arm])
-        trajectory_document = _trajectory_payload(
-            trajectories=trajectories,
-            episode_indices=batch.episode_indices,
-            frame_indices=batch.frame_indices,
-            timestamps=batch.timestamps,
-            selected_episodes=normalized_trajectory_episodes,
+            trajectories = {}
+            for arm in ("left", "right"):
+                local = compute_tool_trajectory(
+                    batch.states,
+                    component_names,
+                    model,
+                    build_trlc_dk1_joint_component_map(arm),
+                    arm=arm,
+                    episode_indices=batch.episode_indices,
+                    gripper_component_name=build_trlc_dk1_gripper_component_name(arm),
+                )
+                trajectories[arm] = transform_tool_trajectory(local, transforms[arm])
+            trajectory_document = _trajectory_payload(
+                trajectories=trajectories,
+                episode_indices=batch.episode_indices,
+                frame_indices=batch.frame_indices,
+                timestamps=batch.timestamps,
+                selected_episodes=normalized_trajectory_episodes,
+            )
+
+    with (
+        measurement.stage("bundleSerialization")
+        if measurement is not None
+        else nullcontext()
+    ):
+        (
+            manifest,
+            coverage_bytes,
+            trajectory_bytes,
+            episode_video_bytes,
+        ) = build_browser_data_documents(
+            bundle_id=bundle_id,
+            summary=summary,
+            selected_episodes=normalized_episodes,
+            model=model,
+            urdf_sha256=sha256_file(urdf_path),
+            urdf_upstream_identity=urdf_upstream_identity,
+            voxel_size=voxel_size,
+            arm_spacing=arm_spacing,
+            coverages=aggregation.coverages,
+            source_provenance=_git_source_provenance(Path(repository_path)),
+            trajectory_payload=trajectory_document,
+            episode_video_payload=episode_video_payload,
         )
 
-    (
-        manifest,
-        coverage_bytes,
-        trajectory_bytes,
-        episode_video_bytes,
-    ) = build_browser_data_documents(
-        bundle_id=bundle_id,
-        summary=summary,
-        selected_episodes=normalized_episodes,
-        model=model,
-        urdf_sha256=sha256_file(urdf_path),
-        urdf_upstream_identity=urdf_upstream_identity,
-        voxel_size=voxel_size,
-        arm_spacing=arm_spacing,
-        coverages=aggregation.coverages,
-        source_provenance=_git_source_provenance(Path(repository_path)),
-        trajectory_payload=trajectory_document,
-        episode_video_payload=episode_video_payload,
-    )
-    return _write_bundle(
+    write_arguments = (
         Path(output_path),
         manifest,
         coverage_bytes,
@@ -695,3 +764,41 @@ def export_browser_data(
         episode_video_bytes,
         episode_video_media,
     )
+    result = (
+        _write_bundle(*write_arguments)
+        if measurement is None
+        else _write_bundle(*write_arguments, measurement=measurement)
+    )
+    if measurement is not None:
+        measurement.finish_export()
+        final_arms = {
+            coverage.arm: ArmCoverageCounts(
+                occupied_entries=coverage.occupied_voxels,
+                csr_incidence=sum(
+                    len(values) for values in coverage.episode_ids_by_voxel
+                ),
+                raw_visits=coverage.num_points,
+            )
+            for coverage in aggregation.coverages
+        }
+        trajectory_sample_counts = {
+            int(episode["episodeId"]): len(episode["frameIndices"])
+            for episode in (trajectory_document or {}).get("episodes", [])
+        }
+        report = measurement.build_report(
+            repository_id=repo_id,
+            requested_revision=summary.requested_revision,
+            resolved_revision=summary.resolved_revision,
+            source_episode_count=summary.total_episodes,
+            coverage_episode_ids=normalized_episodes,
+            trajectory_episode_ids=normalized_trajectory_episodes,
+            episode_batch_size=episode_batch_size,
+            voxel_size=voxel_size,
+            arm_spacing=arm_spacing,
+            selected_frame_count=aggregation.num_frames,
+            final_arms=final_arms,
+            trajectory_sample_counts=trajectory_sample_counts,
+            artifacts=measure_bundle_artifacts(Path(output_path), manifest),
+        )
+        measurement.store_report(report)
+    return result

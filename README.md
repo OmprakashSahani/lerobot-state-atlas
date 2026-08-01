@@ -367,6 +367,19 @@ Generate the pinned demo bundle:
       --bundle-id demo-v2 \
       --output apps/web/public/atlas-data/demo-v2
 
+For an explicitly measured export, add a report path outside the immutable
+bundle directory:
+
+    --measurement-report artifacts/demo-v2-export-measurement.json
+
+The standalone measurement report records export-stage timings, best-effort
+peak process RSS, per-batch coverage growth, and installed artifact sizes.
+Timings and RSS are machine- and platform-dependent operational evidence. The
+report is not referenced by the manifest, and enabling it does not change the
+deterministic bundle files, payload checksums, or browser-data contract.
+See the [full-dataset scaling evidence](docs/full-dataset-scaling.md) for the
+recorded 100-episode pilot measurements and current scaling gates.
+
 To package synchronized MP4 media into a new schema v1.2 bundle, also provide
 both of these options:
 

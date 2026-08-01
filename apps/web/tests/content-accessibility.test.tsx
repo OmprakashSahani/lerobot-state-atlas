@@ -24,10 +24,12 @@ import {
   loadEpisodeVideos,
   loadTrajectories,
 } from "@/lib/data/loadBundle";
+import type { CoverageMetric } from "@/lib/data/metrics";
 import { prepareCoverage } from "@/lib/data/prepareCoverage";
 import type {
   AtlasData,
   CoveragePayload,
+  EpisodeVideoPayload,
   TrajectoryEpisode,
   TrajectoryEpisodeOrientations,
   TrajectoryEpisodeRecordedGripperValues,
@@ -116,6 +118,7 @@ let activeSelection: VoxelSelection | null = {
 };
 let activeRadius = 0.05;
 let activeSpacing = manifest.coverage.armSpacing;
+let activeMetric: CoverageMetric = "visits";
 let viewerCanvasProps: {
   data: AtlasData;
   episode: TrajectoryEpisode | null;
@@ -191,6 +194,28 @@ function rankedEpisodeRow(episodeId: number): HTMLElement {
   return row;
 }
 
+function coverageForEpisodeIds(episodeIds: number[]): CoveragePayload {
+  return {
+    schema: coverage.schema,
+    arms: (["left", "right"] as const).map((arm) => ({
+      arm,
+      toolLink: "tool0",
+      voxelIndices: [[arm === "left" ? 0 : 1, 0, 0]],
+      visitCounts: [episodeIds.length],
+      episodeCounts: [episodeIds.length],
+      episodeIdOffsets: [0, episodeIds.length],
+      episodeIds: [...episodeIds],
+      statistics: {
+        voxelEntryCount: 1,
+        minimumVisitCount: episodeIds.length,
+        maximumVisitCount: episodeIds.length,
+        minimumEpisodeCount: episodeIds.length,
+        maximumEpisodeCount: episodeIds.length,
+      },
+    })),
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -207,6 +232,7 @@ afterEach(() => {
   };
   activeRadius = 0.05;
   activeSpacing = manifest.coverage.armSpacing;
+  activeMetric = "visits";
   viewerCanvasProps = null;
   vi.mocked(loadTrajectories).mockResolvedValue(
     decodeTrajectories(trajectoriesJson, manifest),
@@ -230,7 +256,7 @@ vi.mock("@/components/viewer/ViewerStore", () => ({
     leftVisible: true,
     rightVisible: true,
     cameraResetToken: 0,
-    metric: "visits",
+    metric: activeMetric,
     spacing: activeSpacing,
     radius: activeRadius,
     selection: activeSelection,
@@ -280,12 +306,32 @@ describe("accessible product content", () => {
 
   it("labels viewer controls and preserves the spacing disclosure", () => {
     render(<AtlasViewer />);
-    expect(screen.getByText("schema v1.2")).toBeVisible();
+    expect(screen.getByText("demo-v2 / episodes 0–9")).toBeVisible();
+    const viewerControls = screen.getByRole("complementary", {
+      name: "Viewer controls and metadata",
+    });
+    const episodeAnalysis = screen.getByRole("complementary", {
+      name: "Episode analysis",
+    });
+    expect(viewerControls).toBeVisible();
+    expect(episodeAnalysis).toBeVisible();
+    expect(viewerControls).not.toBe(episodeAnalysis);
+    expect(screen.getAllByRole("heading", { name: "Episode analysis" })).toHaveLength(1);
+    expect(within(episodeAnalysis).getByLabelText("Episode scoring scope")).toBeVisible();
     expect(
-      screen.getByRole("complementary", {
-        name: "Viewer controls and metadata",
+      within(episodeAnalysis).getByRole("list", {
+        name: "Uncommon-space episode ranking for entire coverage",
       }),
     ).toBeVisible();
+    expect(within(episodeAnalysis).queryByLabelText("Metric")).not.toBeInTheDocument();
+    expect(
+      within(episodeAnalysis).queryByRole("heading", { name: "Scene" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(episodeAnalysis).queryByRole("heading", { name: "Robot setup" }),
+    ).not.toBeInTheDocument();
+    expect(within(viewerControls).getByLabelText("Metric")).toBeVisible();
+    expect(screen.getByText("schema v1.2")).toBeVisible();
     expect(screen.getByRole("button", { name: "Reset camera" })).toBeVisible();
     expect(screen.getByLabelText("Metric")).toBeVisible();
     expect(screen.getByLabelText("Visits color range")).toBeVisible();
@@ -293,12 +339,33 @@ describe("accessible product content", () => {
     expect(
       screen.getByRole("button", { name: "Clear selection" }),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Load playback" })).toBeVisible();
+    const loadPlayback = screen.getByRole("button", { name: "Load playback" });
+    expect(loadPlayback).toBeVisible();
+    const mediaToggle = screen.getByRole("button", {
+      name: "Open synchronized media",
+    });
+    const playbackActions = mediaToggle.closest(".playback-primary-actions");
+    expect(playbackActions).not.toBeNull();
+    expect(playbackActions).toContainElement(loadPlayback);
+    expect(loadPlayback).toHaveClass("playback-primary-action");
+    expect(mediaToggle).toHaveClass("playback-primary-action");
+    expect(mediaToggle).toHaveAttribute("aria-expanded", "false");
+    expect(mediaToggle).toHaveAttribute(
+      "aria-controls",
+      "synchronized-media-panel",
+    );
     expect(
-      screen.getByText(
-        "Synchronized episode video is not included in this bundle.",
-      ),
-    ).toBeVisible();
+      screen.queryByText("Synchronized media is not included in this bundle."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Synchronized media" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("viewer-visuals")).not.toHaveClass(
+      "viewer-visuals--media-open",
+    );
+    expect(loadEpisodeVideos).not.toHaveBeenCalled();
+    expect(loadTrajectories).not.toHaveBeenCalled();
+    expect(screen.queryByRole("video")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Auto rotate")).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Robot setup" }),
@@ -322,6 +389,145 @@ describe("accessible product content", () => {
     expect(
       screen.queryByText(manifest.exporter.sourceDescription),
     ).not.toBeInTheDocument();
+  });
+
+  it("opens a request-free synchronized-media empty state without video metadata", async () => {
+    render(<AtlasViewer />);
+
+    const openButton = screen.getByRole("button", {
+      name: "Open synchronized media",
+    });
+    fireEvent.click(openButton);
+
+    expect(
+      screen.getByRole("button", { name: "Close synchronized media" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    const region = screen.getByRole("region", { name: "Synchronized media" });
+    expect(region).toBeVisible();
+    expect(
+      within(region).getByText(
+        "Synchronized media is not included in this bundle.",
+      ),
+    ).toHaveAttribute("role", "note");
+    expect(
+      within(region).getAllByText(
+        "Synchronized media is not included in this bundle.",
+      ),
+    ).toHaveLength(1);
+    expect(screen.getByTestId("viewer-visuals")).toHaveClass(
+      "viewer-visuals--media-open",
+    );
+    expect(loadEpisodeVideos).not.toHaveBeenCalled();
+    expect(loadTrajectories).not.toHaveBeenCalled();
+    expect(region.querySelector("video")).not.toBeInTheDocument();
+    expect(
+      within(region).queryByRole("button", {
+        name: "Retry synchronized media",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(region).queryByRole("button", {
+        name: "Close synchronized media panel",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Close synchronized media" }),
+    ).toHaveLength(1);
+
+    region.focus();
+    fireEvent.keyDown(region, { key: "Escape" });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open synchronized media" }),
+      ).toHaveFocus(),
+    );
+    expect(
+      screen.queryByRole("region", { name: "Synchronized media" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("viewer-visuals")).not.toHaveClass(
+      "viewer-visuals--media-open",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open synchronized media" }),
+    );
+    expect(
+      screen.getByRole("region", { name: "Synchronized media" }),
+    ).toBeVisible();
+    expect(loadEpisodeVideos).not.toHaveBeenCalled();
+    expect(loadTrajectories).not.toHaveBeenCalled();
+  });
+
+  it("fully renders a synthetic 100-episode ranking in its scroll region", () => {
+    const episodeIds = Array.from({ length: 100 }, (_, index) => index);
+    activeManifest = {
+      ...manifest,
+      bundleId: "pilot-100-batch32",
+      dataset: {
+        ...manifest.dataset,
+        episodeIds,
+        episodeCount: episodeIds.length,
+      },
+    };
+    activeCoverage = coverageForEpisodeIds(episodeIds);
+    activePreparedArms = prepareCoverage(activeManifest, activeCoverage);
+    activeSelection = null;
+
+    render(<AtlasViewer />);
+
+    const analysis = screen.getByRole("complementary", {
+      name: "Episode analysis",
+    });
+    const ranking = within(analysis).getByRole("list", {
+      name: "Uncommon-space episode ranking for entire coverage",
+    });
+    expect(within(ranking).getAllByRole("listitem")).toHaveLength(100);
+    expect(ranking.parentElement).toHaveClass("episode-analysis-results");
+    expect(screen.getAllByRole("complementary", { name: "Episode analysis" })).toHaveLength(1);
+    expect(
+      screen.getAllByRole("list", {
+        name: "Uncommon-space episode ranking for entire coverage",
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("keeps ranking order stable across coverage metric changes", () => {
+    const { rerender } = render(<AtlasViewer />);
+    const rankedEpisodes = () =>
+      within(
+        screen.getByRole("list", {
+          name: "Uncommon-space episode ranking for entire coverage",
+        }),
+      )
+        .getAllByRole("listitem")
+        .map((item) => within(item).getByText(/Episode \d+/).textContent);
+    const visitsRanking = rankedEpisodes();
+
+    activeMetric = "episodes";
+    rerender(<AtlasViewer />);
+
+    expect(screen.getByLabelText("Metric")).toHaveValue("episodes");
+    expect(rankedEpisodes()).toEqual(visitsRanking);
+  });
+
+  it("derives stable bundle and episode labeling from coverage metadata", async () => {
+    activeManifest = {
+      ...manifest,
+      bundleId: "pilot-selection",
+    };
+    activeSelection = null;
+    const { rerender } = render(<AtlasViewer />);
+    const expectedLabel = "pilot-selection / episodes 0–9";
+
+    expect(screen.getByText(expectedLabel)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+    expect(await screen.findByLabelText("Episode")).toHaveValue("0");
+    expect(screen.getByText(expectedLabel)).toBeVisible();
+
+    activeRadius = 0.3;
+    activeSpacing = 1.2;
+    rerender(<AtlasViewer />);
+    expect(screen.getByText(expectedLabel)).toBeVisible();
   });
 
   it("presents an accessible global uncommon-space ranking by default", () => {
@@ -511,7 +717,16 @@ describe("accessible product content", () => {
     activeRadius = 0;
     const { rerender } = render(<AtlasViewer />);
     const scope = screen.getByLabelText("Episode scoring scope");
+    const globalRanking = screen.getByRole("list", {
+      name: "Uncommon-space episode ranking for entire coverage",
+    });
+    const globalEpisodes = within(globalRanking)
+      .getAllByRole("listitem")
+      .map((item) => within(item).getByText(/Episode \d+/).textContent);
     fireEvent.change(scope, { target: { value: "radius" } });
+    expect(screen.getByText(/Radius 0\.000 m/)).toHaveTextContent(
+      /arm-specific entry/,
+    );
     const initialSummary = screen.getByText(/episodes? ranked for selected radius/)
       .textContent;
 
@@ -521,6 +736,22 @@ describe("accessible product content", () => {
     expect(screen.getByText(/episodes? ranked for selected radius/).textContent).not.toBe(
       initialSummary,
     );
+
+    fireEvent.change(screen.getByLabelText("Episode scoring scope"), {
+      target: { value: "coverage" },
+    });
+    const restoredRanking = screen.getByRole("list", {
+      name: "Uncommon-space episode ranking for entire coverage",
+    });
+    expect(
+      within(restoredRanking)
+        .getAllByRole("listitem")
+        .map((item) => within(item).getByText(/Episode \d+/).textContent),
+    ).toEqual(globalEpisodes);
+
+    fireEvent.change(screen.getByLabelText("Episode scoring scope"), {
+      target: { value: "radius" },
+    });
 
     activeSelection = null;
     rerender(<AtlasViewer />);
@@ -748,10 +979,68 @@ describe("accessible product content", () => {
     render(<AtlasViewer />);
 
     expect(screen.getByText("schema v1.2")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+    const openMedia = screen.getByRole("button", {
+      name: "Open synchronized media",
+    });
+    expect(openMedia).toHaveAttribute("aria-expanded", "false");
+    expect(openMedia).toHaveAttribute(
+      "aria-controls",
+      "synchronized-media-panel",
+    );
+    expect(
+      screen.queryByRole("region", { name: "Synchronized media" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("viewer-visuals")).not.toHaveClass(
+      "viewer-visuals--media-open",
+    );
+    expect(loadEpisodeVideos).not.toHaveBeenCalled();
+
+    fireEvent.click(openMedia);
+    expect(loadEpisodeVideos).toHaveBeenCalledTimes(1);
+    expect(loadTrajectories).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Timeline")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close synchronized media" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("region", { name: "Synchronized media" }),
+    ).toBeVisible();
+    expect(screen.getByTestId("viewer-visuals")).toHaveClass(
+      "viewer-visuals--media-open",
+    );
+    expect(
+      await screen.findByText(
+        "Load trajectory playback to select synchronized episode media.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", {
+        name: "Close synchronized media panel",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Close synchronized media" }),
+    ).toHaveLength(1);
+
+    const loadPlayback = screen.getByRole("button", { name: "Load playback" });
+    const playbackActions = loadPlayback.closest(".playback-primary-actions");
+    expect(loadPlayback).toHaveClass("playback-primary-action");
+    expect(
+      screen.getByRole("button", { name: "Close synchronized media" }),
+    ).toHaveClass("playback-primary-action");
+    fireEvent.click(loadPlayback);
     const video = await screen.findByLabelText(
       "Top camera synchronized episode video",
     );
+    expect(
+      screen.queryByRole("button", { name: "Load playback" }),
+    ).not.toBeInTheDocument();
+    expect(playbackActions).toContainElement(
+      screen.getByRole("button", { name: "Close synchronized media" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Close synchronized media" }),
+    ).toHaveClass("playback-primary-action");
     expect(video).toHaveAttribute(
       "src",
       "/atlas-data/demo-v2/media/episode-0/top.mp4",
@@ -779,20 +1068,122 @@ describe("accessible product content", () => {
       "src",
       "/atlas-data/demo-v2/media/episode-1/left.mp4",
     );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close synchronized media" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Open synchronized media" }),
+      ).toHaveFocus(),
+    );
+    expect(
+      screen.queryByRole("region", { name: "Synchronized media" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Left wrist camera synchronized episode video"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("viewer-visuals")).not.toHaveClass(
+      "viewer-visuals--media-open",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open synchronized media" }),
+    );
+    expect(loadEpisodeVideos).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByLabelText("Left wrist camera synchronized episode video"),
+    ).toHaveAttribute(
+      "src",
+      "/atlas-data/demo-v2/media/episode-1/left.mp4",
+    );
   });
 
-  it("keeps trajectory controls when optional video metadata fails", async () => {
+  it("reports media loading without starting playback", async () => {
+    activeManifest = manifestWithVideos;
+    let resolveMetadata: ((value: EpisodeVideoPayload) => void) | undefined;
+    vi.mocked(loadEpisodeVideos).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveMetadata = resolve;
+      }),
+    );
+    render(<AtlasViewer />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open synchronized media" }),
+    );
+
+    expect(
+      within(
+        screen.getByRole("region", { name: "Synchronized media" }),
+      ).getByRole("status"),
+    ).toHaveTextContent(
+      "Loading synchronized video metadata",
+    );
+    expect(loadTrajectories).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Timeline")).not.toBeInTheDocument();
+
+    resolveMetadata?.(episodeVideos);
+    expect(
+      await screen.findByText(
+        "Load trajectory playback to select synchronized episode media.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("discloses a sparse episode-video selection honestly", async () => {
+    activeManifest = manifestWithVideos;
+    vi.mocked(loadEpisodeVideos).mockResolvedValueOnce({
+      ...episodeVideos,
+      episodes: episodeVideos.episodes.filter((item) => item.episodeId === 0),
+    });
+    render(<AtlasViewer />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open synchronized media" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
+    await screen.findByLabelText("Top camera synchronized episode video");
+    fireEvent.change(screen.getByLabelText("Episode"), {
+      target: { value: "1" },
+    });
+
+    expect(
+      screen.getByText(
+        "No synchronized top camera video is available for this episode.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByLabelText("Top camera synchronized episode video"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps trajectory controls when optional video metadata fails and retries", async () => {
     activeManifest = manifestWithVideos;
     vi.mocked(loadEpisodeVideos).mockRejectedValueOnce(
       new Error("Invalid video metadata."),
     );
     render(<AtlasViewer />);
 
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open synchronized media" }),
+    );
+    expect(
+      await screen.findByText(/Synchronized episode video is unavailable/),
+    ).toBeVisible();
+    expect(loadEpisodeVideos).toHaveBeenCalledTimes(1);
+
     fireEvent.click(screen.getByRole("button", { name: "Load playback" }));
     expect(await screen.findByLabelText("Timeline")).toBeVisible();
     expect(screen.getByRole("button", { name: "Play" })).toBeVisible();
+    expect(loadEpisodeVideos).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry synchronized media" }),
+    );
+    expect(loadEpisodeVideos).toHaveBeenCalledTimes(2);
     expect(
-      await screen.findByText(/Synchronized episode video is unavailable/),
+      await screen.findByLabelText("Top camera synchronized episode video"),
     ).toBeVisible();
   });
 });

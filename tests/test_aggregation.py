@@ -7,6 +7,7 @@ from lerobot_state_atlas.aggregation import (
     aggregate_workspace_coverages,
 )
 from lerobot_state_atlas.coverage import WorkspaceCoverage
+from lerobot_state_atlas.export_measurement import ExportMeasurementSession
 from lerobot_state_atlas.trajectory import ToolTrajectory
 from lerobot_state_atlas.transforms import RigidTransform
 
@@ -42,7 +43,7 @@ def test_aggregate_workspace_coverages_processes_bounded_batches(
         yield from batches
 
     monkeypatch.setattr(
-        "lerobot_state_atlas.aggregation.iter_state_batches",
+        "lerobot_state_atlas.aggregation.iter_coverage_state_batches",
         fake_iter_state_batches,
     )
 
@@ -119,6 +120,86 @@ def test_aggregate_workspace_coverages_processes_bounded_batches(
     assert all(coverage.num_points == 5 for coverage in result.coverages)
 
 
+def test_aggregate_workspace_coverages_reports_cumulative_batch_counts(
+    monkeypatch,
+) -> None:
+    batches = (
+        SimpleNamespace(
+            states=torch.zeros((3, 14), dtype=torch.float32),
+            episode_indices=torch.tensor([0, 0, 1], dtype=torch.int64),
+        ),
+        SimpleNamespace(
+            states=torch.zeros((2, 14), dtype=torch.float32),
+            episode_indices=torch.tensor([2, 2], dtype=torch.int64),
+        ),
+    )
+    monkeypatch.setattr(
+        "lerobot_state_atlas.aggregation.iter_coverage_state_batches",
+        lambda *args, **kwargs: iter(batches),
+    )
+
+    def fake_compute(
+        states: torch.Tensor,
+        *args,
+        arm: str,
+        episode_indices: torch.Tensor,
+        **kwargs,
+    ) -> ToolTrajectory:
+        del args, kwargs
+        offset = 0.0 if arm == "left" else 1.0
+        positions = torch.stack(
+            (
+                torch.full((states.shape[0],), offset, dtype=torch.float64),
+                torch.arange(states.shape[0], dtype=torch.float64),
+                torch.zeros(states.shape[0], dtype=torch.float64),
+            ),
+            dim=1,
+        )
+        return ToolTrajectory(
+            arm=arm,
+            link_name="tool0",
+            positions=positions,
+            rotation_matrices=torch.eye(3, dtype=torch.float64).repeat(
+                states.shape[0], 1, 1
+            ),
+            episode_indices=episode_indices,
+        )
+
+    monkeypatch.setattr(
+        "lerobot_state_atlas.aggregation.compute_tool_trajectory",
+        fake_compute,
+    )
+    completed = []
+    clock = iter(float(value) for value in range(5))
+    measurement = ExportMeasurementSession(
+        monotonic_clock=lambda: next(clock),
+        progress_callback=completed.append,
+    )
+
+    result = aggregate_workspace_coverages(
+        "organization/dataset",
+        (0, 1, 2),
+        component_names=("component",) * 14,
+        model=object(),
+        voxel_size=0.5,
+        episode_batch_size=2,
+        measurement=measurement,
+    )
+
+    assert result.num_frames == 5
+    assert [batch.episode_ids for batch in completed] == [(0, 1), (2,)]
+    assert [batch.frame_count for batch in completed] == [3, 2]
+    assert [batch.cumulative_frame_count for batch in completed] == [3, 5]
+    assert [batch.elapsed_seconds for batch in completed] == [1.0, 1.0]
+    for arm in ("left", "right"):
+        assert completed[0].arms[arm].occupied_entries == 3
+        assert completed[0].arms[arm].csr_incidence == 3
+        assert completed[0].arms[arm].raw_visits == 3
+        assert completed[1].arms[arm].occupied_entries == 3
+        assert completed[1].arms[arm].csr_incidence == 5
+        assert completed[1].arms[arm].raw_visits == 5
+
+
 @pytest.mark.parametrize("episode_batch_size", [0, -1])
 def test_aggregate_workspace_coverages_rejects_invalid_batch_size(
     episode_batch_size: int,
@@ -155,7 +236,7 @@ def test_aggregate_workspace_coverages_applies_arm_transforms_before_voxelizatio
         yield batch
 
     monkeypatch.setattr(
-        "lerobot_state_atlas.aggregation.iter_state_batches",
+        "lerobot_state_atlas.aggregation.iter_coverage_state_batches",
         fake_iter_state_batches,
     )
 
