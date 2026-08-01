@@ -314,9 +314,16 @@ the complete network-user experience.
 - Coverage min/max preparation no longer spreads payload-sized arrays into
   function arguments, and visible episode labeling now derives from the
   manifest selection.
-- Introduce a dedicated Episode Analysis panel for scoring scope and ranking in
-  the next implementation commit; this measurement does not implement it.
-- Measure the revised layout again with 100 episodes.
+- The dedicated Episode Analysis panel now separates scoring scope and the
+  fully rendered, non-virtualized ranking from the main viewer controls.
+- The synchronized-media toggle is always discoverable. Media is closed by
+  default and opens on demand as a split panel; bundles without video open a
+  truthful request-free empty state and reserve no media column while closed.
+- The playback section uses that one persistent media toggle for opening and
+  closing, with Escape as the in-panel close shortcut. The local pilot remains
+  coverage-only; default video-capable `demo-v2` verifies the media workflow.
+- Visually verify both the local pilot and `demo-v2` before committing.
+- Measure the revised Episode Analysis layout again with 100 episodes next.
 - If that evidence remains acceptable, make a measured 250-episode export and
   local browser run the next dataset gate.
 - Preserve staged growth: measure 250 episodes, then 500 episodes, then the full
