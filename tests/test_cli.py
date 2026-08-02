@@ -90,6 +90,147 @@ def test_version() -> None:
     assert "lerobot-state-atlas 0.1.0" in plain_output(result)
 
 
+def test_validate_checkpoint_comparison_command() -> None:
+    fixture = Path(__file__).parent / "fixtures/checkpoint-comparison-v1"
+    result = runner.invoke(app, ["validate-checkpoint-comparison", str(fixture)])
+    assert result.exit_code == 0
+    assert "synthetic-checkpoint-comparison-v1" in plain_output(result)
+    assert "schema1.0" in compact_output(plain_output(result))
+
+
+def test_validate_checkpoint_comparison_command_reports_concise_failure(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "invalid-comparison"
+    bundle.mkdir()
+    (bundle / "manifest.json").write_text("{}", encoding="utf-8")
+    result = runner.invoke(app, ["validate-checkpoint-comparison", str(bundle)])
+    assert result.exit_code == 1
+    output = plain_output(result)
+    assert "Invalid checkpoint comparison" in output
+    assert "manifest is missing fields" in output
+    assert "Traceback" not in output
+
+
+def test_run_checkpoint_comparison_preflight_only_json(monkeypatch) -> None:
+    import lerobot_state_atlas.cli as cli
+
+    monkeypatch.setattr(
+        cli,
+        "preflight_checkpoint_comparison_runner",
+        lambda path: SimpleNamespace(
+            requested_device="cuda:0",
+            gpu_name="Fake GPU",
+            manifest_sha256="a" * 64,
+            passed=True,
+        ),
+    )
+    result = runner.invoke(
+        app,
+        ["run-checkpoint-comparison", "runner.json", "--preflight-only", "--json"],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "preflight-only"
+    assert payload["policyOrder"] == ["base-pi05", "fine-tuned-pi05"]
+
+
+def test_run_checkpoint_comparison_reports_phase_without_traceback(monkeypatch) -> None:
+    import lerobot_state_atlas.cli as cli
+    from lerobot_state_atlas.checkpoint_comparison import (
+        CheckpointComparisonRunnerError,
+    )
+
+    def fail(path):
+        raise CheckpointComparisonRunnerError("preflight", "CUDA unavailable")
+
+    monkeypatch.setattr(cli, "preflight_checkpoint_comparison_runner", fail)
+    result = runner.invoke(
+        app, ["run-checkpoint-comparison", "runner.json", "--preflight-only"]
+    )
+    assert result.exit_code == 1
+    assert "preflight" in plain_output(result)
+    assert "CUDA unavailable" in plain_output(result)
+    assert "Traceback" not in plain_output(result)
+
+
+def test_preflight_cli_identifies_checkpoint_staging_filesystem_failure(
+    monkeypatch,
+) -> None:
+    import lerobot_state_atlas.cli as cli
+    from lerobot_state_atlas.checkpoint_comparison import (
+        CheckpointComparisonPreflightError,
+    )
+
+    def fail(path):
+        raise CheckpointComparisonPreflightError(
+            "resources.checkpoint-staging-filesystem checkpoint staging at "
+            "/injected/temp observed 65539 free bytes; largest checkpoint is 4 bytes; "
+            "configured minimumFreeDiskBytes is 1; effective required free bytes "
+            "are 65540; shortfall is 1 byte."
+        )
+
+    monkeypatch.setattr(cli, "preflight_checkpoint_comparison_runner", fail)
+    result = runner.invoke(
+        app, ["run-checkpoint-comparison", "runner.json", "--preflight-only"]
+    )
+    output = plain_output(result)
+    assert result.exit_code == 1
+    assert "checkpoint-staging-filesystem" in output
+    assert "/injected/temp" in output
+    assert "effective required free bytes are 65540" in output
+    assert "Traceback" not in output
+
+
+def test_run_checkpoint_comparison_reports_secondary_cleanup_without_masking_primary(
+    monkeypatch, tmp_path
+) -> None:
+    import lerobot_state_atlas.cli as cli
+    from lerobot_state_atlas.checkpoint_comparison import (
+        CheckpointComparisonRunnerError,
+        RunnerCleanupFailure,
+    )
+
+    recoverable = tmp_path / "staging"
+    failure = RunnerCleanupFailure(
+        resource="temporary-run-directory",
+        exception_type="OSError",
+        message="directory busy",
+        recoverable_path=recoverable,
+        manual_retry_possible=True,
+        installed_output_remains_valid=False,
+    )
+
+    def fail(path):
+        error = CheckpointComparisonRunnerError("base-inference", "model failed")
+        error.attach_cleanup_failures((failure,))
+        raise error
+
+    monkeypatch.setattr(cli, "execute_checkpoint_comparison_run", fail)
+    human = runner.invoke(app, ["run-checkpoint-comparison", "runner.json"])
+    assert human.exit_code == 1
+    output = plain_output(human)
+    assert output.index("base-inference") < output.index("Secondary cleanup failure")
+    assert "model failed" in output
+    assert str(recoverable) in output.replace("\n", "")
+
+    machine = runner.invoke(app, ["run-checkpoint-comparison", "runner.json", "--json"])
+    assert machine.exit_code == 1
+    payload = json.loads(machine.stdout)
+    assert payload["phase"] == "base-inference"
+    assert payload["cleanupFailures"] == [
+        {
+            "exceptionType": "OSError",
+            "installedOutputRemainsValid": False,
+            "manualRetryPossible": True,
+            "message": "directory busy",
+            "recoverablePath": str(recoverable),
+            "resource": "temporary-run-directory",
+        }
+    ]
+    assert payload["recoverablePaths"] == [str(recoverable)]
+
+
 def test_export_browser_data_help_includes_optional_inputs() -> None:
     result = runner.invoke(app, ["export-browser-data", "--help"])
     assert result.exit_code == 0

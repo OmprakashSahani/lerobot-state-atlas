@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lerobot-state-atlas.local/schemas/checkpoint-comparison-runner-v1.schema.json",
+  "title": "LeRobot State Atlas checkpoint-comparison runner manifest v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "dataset", "observationManifest", "checkpoints", "configuration", "processors", "robot", "runtime", "projection", "output"],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "relativePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*://).+$"},
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "byteCount", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relativePath"},
+        "byteCount": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "baseCheckpoint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repositoryId", "revision", "path", "byteCount", "sha256"],
+      "properties": {
+        "repositoryId": {"const": "lerobot/pi05_base"},
+        "revision": {"const": "b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba"},
+        "path": {"$ref": "#/$defs/relativePath"}, "byteCount": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "fineTunedCheckpoint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repositoryId", "revision", "path", "byteCount", "sha256"],
+      "properties": {
+        "repositoryId": {"const": "DreamMachines/actuator_unboxing_4h_diverse_fullft_bs256"},
+        "revision": {"const": "6c50dbbccd576e4e384ed51a8244272aab5f3c62"},
+        "path": {"$ref": "#/$defs/relativePath"}, "byteCount": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "transform": {
+      "type": "object", "additionalProperties": false,
+      "required": ["translationXyz", "rotationRpy"],
+      "properties": {
+        "translationXyz": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+        "rotationRpy": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}
+      }
+    }
+  },
+  "properties": {
+    "schema": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "major", "minor"],
+      "properties": {
+        "name": {"const": "lerobot-state-atlas.checkpoint-comparison-runner"},
+        "major": {"const": 1}, "minor": {"const": 0}
+      }
+    },
+    "dataset": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repositoryId", "revision"],
+      "properties": {
+        "repositoryId": {"const": "DreamMachines/actuator_unboxing_4h_diverse"},
+        "revision": {"const": "e973df866c80f52884cc68355579043cab828e78"}
+      }
+    },
+    "observationManifest": {"$ref": "#/$defs/file"},
+    "checkpoints": {
+      "type": "object", "additionalProperties": false, "required": ["base", "fineTuned"],
+      "properties": {
+        "base": {"$ref": "#/$defs/baseCheckpoint"},
+        "fineTuned": {"$ref": "#/$defs/fineTunedCheckpoint"}
+      }
+    },
+    "configuration": {"$ref": "#/$defs/file"},
+    "processors": {
+      "type": "object", "additionalProperties": false,
+      "required": ["preprocessorConfig", "preprocessorState", "postprocessorConfig", "postprocessorState", "tokenizerDirectory"],
+      "properties": {
+        "preprocessorConfig": {"$ref": "#/$defs/file"},
+        "preprocessorState": {"$ref": "#/$defs/file"},
+        "postprocessorConfig": {"$ref": "#/$defs/file"},
+        "postprocessorState": {"$ref": "#/$defs/file"},
+        "tokenizerDirectory": {
+          "type": "object", "additionalProperties": false, "required": ["path", "identitySha256"],
+          "properties": {"path": {"$ref": "#/$defs/relativePath"}, "identitySha256": {"$ref": "#/$defs/sha256"}}
+        }
+      }
+    },
+    "robot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["urdfPath", "urdfByteCount", "urdfSha256", "upstreamRevisionIdentity", "leftArmTransform", "rightArmTransform", "calibratedArmTransforms"],
+      "properties": {
+        "urdfPath": {"$ref": "#/$defs/relativePath"}, "urdfByteCount": {"type": "integer", "minimum": 1},
+        "urdfSha256": {"$ref": "#/$defs/sha256"}, "upstreamRevisionIdentity": {"type": "string", "minLength": 1},
+        "leftArmTransform": {"$ref": "#/$defs/transform"}, "rightArmTransform": {"$ref": "#/$defs/transform"},
+        "calibratedArmTransforms": {"type": "boolean"}
+      }
+    },
+    "runtime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["device", "modelDtype", "noiseDtype", "noiseSeed", "numInferenceSteps", "minimumFreeVramBytes", "minimumAvailableRamBytes", "minimumFreeDiskBytes"],
+      "properties": {
+        "device": {"type": "string", "pattern": "^cuda:(0|[1-9][0-9]*)$"},
+        "modelDtype": {"enum": ["bfloat16", "float32"]}, "noiseDtype": {"const": "float32"},
+        "noiseSeed": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+        "numInferenceSteps": {"type": "integer", "minimum": 1},
+        "minimumFreeVramBytes": {"type": "integer", "minimum": 0},
+        "minimumAvailableRamBytes": {"type": "integer", "minimum": 0},
+        "minimumFreeDiskBytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "projection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "jointLimitPolicy", "unavailableReason", "acknowledgeUncalibratedArmTransforms", "acknowledgeRecordedLimitViolations"],
+      "properties": {
+        "mode": {"enum": ["available", "unavailable"]},
+        "jointLimitPolicy": {"enum": ["reject", "allow-with-recorded-violations"]},
+        "unavailableReason": {"type": ["string", "null"]},
+        "acknowledgeUncalibratedArmTransforms": {"type": "boolean"},
+        "acknowledgeRecordedLimitViolations": {"type": "boolean"}
+      }
+    },
+    "output": {
+      "type": "object", "additionalProperties": false, "required": ["runDirectory", "bundleId", "replaceExisting"],
+      "properties": {
+        "runDirectory": {"$ref": "#/$defs/relativePath"}, "bundleId": {"type": "string", "minLength": 1},
+        "replaceExisting": {"type": "boolean"}
+      }
+    }
+  }
+}
