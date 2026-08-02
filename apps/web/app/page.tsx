@@ -26,6 +26,9 @@ export default function HomePage() {
             <Link className="button button-secondary" href="/methodology">
               Read the methodology
             </Link>
+            <Link className="button button-secondary" href="/checkpoint-comparison">
+              Compare checkpoints
+            </Link>
           </div>
           <p className="calibration-note">
             The demo&apos;s 0.8 m arm spacing is a configurable visualization

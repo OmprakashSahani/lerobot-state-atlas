@@ -13,6 +13,12 @@ from lerobot_state_atlas.browser_data import (
     export_browser_data,
     validate_browser_data,
 )
+from lerobot_state_atlas.checkpoint_comparison import (
+    CheckpointComparisonRunnerError,
+    execute_checkpoint_comparison_run,
+    preflight_checkpoint_comparison_runner,
+    validate_checkpoint_comparison,
+)
 from lerobot_state_atlas.coverage import (
     compute_workspace_coverage,
 )
@@ -64,6 +70,152 @@ def callback() -> None:
 def version() -> None:
     """Display the installed application version."""
     console.print("lerobot-state-atlas 0.1.0")
+
+
+def _deterministic_cli_json(value: dict) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+@app.command("run-checkpoint-comparison")
+def run_checkpoint_comparison(
+    runner_manifest: Path = typer.Argument(
+        ...,
+        help="Local checkpoint-comparison runner manifest.",
+    ),
+    preflight_only: bool = typer.Option(
+        False,
+        "--preflight-only",
+        help="Validate inputs and resources without decoding cameras or constructing models.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit deterministic machine-readable output without Rich formatting.",
+    ),
+) -> None:
+    """Run the strict local-only Base π0.5 versus Fine-tuned π0.5 workflow."""
+    try:
+        if preflight_only:
+            report = preflight_checkpoint_comparison_runner(runner_manifest)
+            payload = {
+                "device": report.requested_device,
+                "gpuName": report.gpu_name,
+                "manifestSha256": report.manifest_sha256,
+                "mode": "preflight-only",
+                "passed": report.passed,
+                "policyOrder": ["base-pi05", "fine-tuned-pi05"],
+            }
+            if json_output:
+                typer.echo(_deterministic_cli_json(payload))
+            else:
+                console.print(
+                    "Checkpoint comparison preflight passed\n"
+                    f"Manifest: {report.manifest_sha256}\n"
+                    f"Device: {report.requested_device} ({report.gpu_name})\n"
+                    "Policy order: Base π0.5, Fine-tuned π0.5"
+                )
+            return
+        result = execute_checkpoint_comparison_run(runner_manifest)
+        payload = {
+            "bundlePath": str(result.comparison_directory),
+            "calibratedArmTransforms": result.calibrated_arm_transforms,
+            "checkpointSha256": dict(result.checkpoint_sha256),
+            "jointLimitViolationCount": result.joint_limit_violation_count,
+            "manifestSha256": result.preflight.manifest_sha256,
+            "mode": "full",
+            "observationId": result.observation_id,
+            "policyOrder": list(result.policy_order),
+            "projectionAvailable": result.projection_available,
+            "receiptPath": str(result.receipt_path),
+            "runDirectory": str(result.run_directory),
+            "schemaVersion": result.schema_version,
+            "status": "installed",
+        }
+        if json_output:
+            typer.echo(_deterministic_cli_json(payload))
+        else:
+            console.print(
+                "Checkpoint comparison installed\n"
+                f"Observation: {result.observation_id}\n"
+                f"Bundle: {result.comparison_directory}\n"
+                f"Receipt: {result.receipt_path}\n"
+                f"Schema: {result.schema_version}\n"
+                "Policy order: Base π0.5, Fine-tuned π0.5\n"
+                f"Projection available: {result.projection_available}\n"
+                f"Calibrated arm transforms: {result.calibrated_arm_transforms}\n"
+                f"Joint-limit violations: {result.joint_limit_violation_count}"
+            )
+    except Exception as error:
+        phase = (
+            error.phase
+            if isinstance(error, CheckpointComparisonRunnerError)
+            else "execution"
+        )
+        if json_output:
+            recoverable = (
+                [str(path) for path in error.recoverable_paths]
+                if isinstance(error, CheckpointComparisonRunnerError)
+                else []
+            )
+            cleanup_failures = (
+                [
+                    {
+                        "exceptionType": failure.exception_type,
+                        "installedOutputRemainsValid": (
+                            failure.installed_output_remains_valid
+                        ),
+                        "manualRetryPossible": failure.manual_retry_possible,
+                        "message": failure.message,
+                        "recoverablePath": (
+                            str(failure.recoverable_path)
+                            if failure.recoverable_path is not None
+                            else None
+                        ),
+                        "resource": failure.resource,
+                    }
+                    for failure in error.cleanup_failures
+                ]
+                if isinstance(error, CheckpointComparisonRunnerError)
+                else []
+            )
+            typer.echo(
+                _deterministic_cli_json(
+                    {
+                        "cleanupFailures": cleanup_failures,
+                        "error": str(error),
+                        "phase": phase,
+                        "recoverablePaths": recoverable,
+                        "status": "failed",
+                    }
+                )
+            )
+        else:
+            console.print(f"[red]Checkpoint comparison failed ({phase}):[/red] {error}")
+            if isinstance(error, CheckpointComparisonRunnerError):
+                for failure in error.cleanup_failures:
+                    path = (
+                        f" Recoverable path: {failure.recoverable_path}."
+                        if failure.recoverable_path is not None
+                        else " No recoverable temporary path remains."
+                    )
+                    installed = (
+                        " The installed run remains valid."
+                        if failure.installed_output_remains_valid
+                        else ""
+                    )
+                    console.print(
+                        "[yellow]Secondary cleanup failure "
+                        f"({failure.resource}):[/yellow] "
+                        f"{failure.exception_type}: {failure.message}."
+                        f"{path}{installed}"
+                    )
+        raise typer.Exit(code=1) from error
 
 
 def display_dataset_summary(summary: DatasetSummary) -> None:
@@ -880,6 +1032,31 @@ def validate_browser_data_command(
         f"Valid browser-data bundle [bold]{manifest['bundleId']}[/bold] "
         f"(schema {manifest['schema']['major']}."
         f"{manifest['schema']['minor']})."
+    )
+
+
+@app.command("validate-checkpoint-comparison")
+def validate_checkpoint_comparison_command(
+    path: Path = typer.Argument(
+        ...,
+        help="Checkpoint-comparison v1 bundle directory.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+    ),
+) -> None:
+    """Validate a checkpoint-comparison v1 bundle and payload checksum."""
+    try:
+        manifest = validate_checkpoint_comparison(path)
+    except Exception as error:
+        console.print(f"[red]Invalid checkpoint comparison:[/red] {error}")
+        raise typer.Exit(code=1) from error
+
+    console.print(
+        f"Valid checkpoint-comparison bundle [bold]{manifest['bundleId']}[/bold] "
+        f"(schema {manifest['schema']['major']}.{manifest['schema']['minor']})."
     )
 
 

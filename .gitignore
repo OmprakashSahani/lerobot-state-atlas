@@ -231,3 +231,5 @@ apps/web/.next/
 apps/web/*.tsbuildinfo
 apps/web/next-env.d.ts
 /apps/web/public/atlas-data/__local-benchmark__/
+/apps/web/public/atlas-data/__local-checkpoint-comparison__/
+/apps/web/test-results/checkpoint-comparison/

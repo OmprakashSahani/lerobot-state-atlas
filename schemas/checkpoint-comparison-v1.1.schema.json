@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OmprakashSahani/lerobot-state-atlas/schemas/checkpoint-comparison-v1.1.schema.json",
+  "title": "LeRobot State Atlas checkpoint comparison v1.1",
+  "description": "Structural schema for deterministic policy plans with an explicit available or unavailable trajectory projection. Cross-file hashes, ordering, unit quaternion checks, and semantic agreement are enforced by the Python validator.",
+  "oneOf": [{"$ref": "#/$defs/manifest"}, {"$ref": "#/$defs/plansPayload"}],
+  "$defs": {
+    "version": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "major", "minor"],
+      "properties": {
+        "name": {"const": "lerobot-state-atlas.checkpoint-comparison"},
+        "major": {"const": 1}, "minor": {"const": 1}
+      }
+    },
+    "sha40": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "finiteNumber": {"type": "number"},
+    "componentNames": {
+      "const": ["left_joint_1.pos", "left_joint_2.pos", "left_joint_3.pos", "left_joint_4.pos", "left_joint_5.pos", "left_joint_6.pos", "left_gripper.pos", "right_joint_1.pos", "right_joint_2.pos", "right_joint_3.pos", "right_joint_4.pos", "right_joint_5.pos", "right_joint_6.pos", "right_gripper.pos"]
+    },
+    "action": {"type": "array", "minItems": 14, "maxItems": 14, "items": {"$ref": "#/$defs/finiteNumber"}},
+    "actionChunk": {"type": "array", "minItems": 50, "maxItems": 50, "items": {"$ref": "#/$defs/action"}},
+    "times": {"type": "array", "minItems": 50, "maxItems": 50, "items": {"$ref": "#/$defs/finiteNumber"}},
+    "recorded": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["available", "reason"], "properties": {"available": {"const": false}, "reason": {"type": "string", "minLength": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["available", "reason", "relativeTimesSeconds", "actions"], "properties": {"available": {"const": true}, "reason": {"type": "null"}, "relativeTimesSeconds": {"$ref": "#/$defs/times"}, "actions": {"$ref": "#/$defs/actionChunk"}}}
+      ]
+    },
+    "mapping": {
+      "type": "object", "additionalProperties": false,
+      "required": ["urdfJointName", "componentName"],
+      "properties": {"urdfJointName": {"type": "string", "minLength": 1}, "componentName": {"type": "string", "minLength": 1}}
+    },
+    "transform": {
+      "type": "object", "additionalProperties": false,
+      "required": ["translationXyz", "rotationRpy"],
+      "properties": {
+        "translationXyz": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/finiteNumber"}},
+        "rotationRpy": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/finiteNumber"}}
+      }
+    },
+    "arm": {
+      "type": "object", "additionalProperties": false,
+      "required": ["armId", "targetLink", "positionsXyz", "orientationsXyzw", "generatedRawGripperTargets"],
+      "properties": {
+        "armId": {"enum": ["left", "right"]}, "targetLink": {"type": "string", "minLength": 1},
+        "positionsXyz": {"type": "array", "minItems": 50, "maxItems": 50, "items": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/finiteNumber"}}},
+        "orientationsXyzw": {"type": "array", "minItems": 50, "maxItems": 50, "items": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"$ref": "#/$defs/finiteNumber"}}},
+        "generatedRawGripperTargets": {"type": "array", "minItems": 50, "maxItems": 50, "items": {"$ref": "#/$defs/finiteNumber"}}
+      }
+    },
+    "violation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["policyId", "stepIndex", "componentName", "urdfJointName", "value", "bound", "violationKind"],
+      "properties": {
+        "policyId": {"enum": ["base-pi05", "fine-tuned-pi05"]},
+        "stepIndex": {"type": "integer", "minimum": 0, "maximum": 49},
+        "componentName": {"enum": ["left_joint_1.pos", "left_joint_2.pos", "left_joint_3.pos", "left_joint_4.pos", "left_joint_5.pos", "left_joint_6.pos", "right_joint_1.pos", "right_joint_2.pos", "right_joint_3.pos", "right_joint_4.pos", "right_joint_5.pos", "right_joint_6.pos"]},
+        "urdfJointName": {"type": "string", "minLength": 1}, "value": {"$ref": "#/$defs/finiteNumber"}, "bound": {"$ref": "#/$defs/finiteNumber"}, "violationKind": {"enum": ["lower", "upper"]}
+      }
+    },
+    "projectedPlan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["policyId", "relativeTimesSeconds", "left", "right", "jointLimitViolations"],
+      "properties": {"policyId": {"enum": ["base-pi05", "fine-tuned-pi05"]}, "relativeTimesSeconds": {"$ref": "#/$defs/times"}, "left": {"$ref": "#/$defs/arm"}, "right": {"$ref": "#/$defs/arm"}, "jointLimitViolations": {"type": "array", "items": {"$ref": "#/$defs/violation"}}}
+    },
+    "trajectoryProjection": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["available", "reason"], "properties": {"available": {"const": false}, "reason": {"type": "string", "minLength": 1}}},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["available", "sharedConfiguration", "actionInterpretation", "initialState", "robot", "jointLimitPolicy", "plans"],
+          "properties": {
+            "available": {"const": true}, "sharedConfiguration": {"const": true},
+            "actionInterpretation": {
+              "type": "object", "additionalProperties": false,
+              "required": ["interpretationId", "interpretationVersion", "useRelativeActions", "deltaActionsPreprocessorEnabled", "absoluteActionsPostprocessorEnabled", "componentNames", "initialStateParticipatesInTransformation", "transformationsPerformed"],
+              "properties": {
+                "interpretationId": {"const": "pi05-postprocessed-absolute-position-targets"}, "interpretationVersion": {"const": "1.0"},
+                "useRelativeActions": {"const": false}, "deltaActionsPreprocessorEnabled": {"const": false}, "absoluteActionsPostprocessorEnabled": {"const": false},
+                "componentNames": {"$ref": "#/$defs/componentNames"}, "initialStateParticipatesInTransformation": {"const": false},
+                "transformationsPerformed": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+              }
+            },
+            "initialState": {
+              "type": "object", "additionalProperties": false,
+              "required": ["featureName", "componentNames", "values", "hashRepresentation", "sha256", "initialStateParticipatesInTransformation"],
+              "properties": {"featureName": {"const": "observation.state"}, "componentNames": {"$ref": "#/$defs/componentNames"}, "values": {"$ref": "#/$defs/action"}, "hashRepresentation": {"const": "deterministic-json-array-v1"}, "sha256": {"$ref": "#/$defs/sha256"}, "initialStateParticipatesInTransformation": {"const": false}}
+            },
+            "robot": {
+              "type": "object", "additionalProperties": false,
+              "required": ["robotModelName", "rootLink", "targetLink", "urdfSha256", "fkImplementationId", "fkImplementationVersion", "leftJointMapping", "rightJointMapping", "leftArmTransform", "rightArmTransform", "calibratedArmTransforms", "lengthUnit", "angularUnit", "handedness", "outputCoordinateFrame", "rotationRepresentation", "rotationComponentOrder", "generatedGripperSemantics", "gripperSemanticDisclaimer", "calibratedGripperGeometry"],
+              "properties": {
+                "robotModelName": {"type": "string", "minLength": 1}, "rootLink": {"type": "string", "minLength": 1}, "targetLink": {"type": "string", "minLength": 1}, "urdfSha256": {"$ref": "#/$defs/sha256"}, "upstreamRevisionIdentity": {"type": "string", "minLength": 1},
+                "fkImplementationId": {"type": "string", "minLength": 1}, "fkImplementationVersion": {"type": "string", "minLength": 1},
+                "leftJointMapping": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"$ref": "#/$defs/mapping"}}, "rightJointMapping": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"$ref": "#/$defs/mapping"}},
+                "leftArmTransform": {"$ref": "#/$defs/transform"}, "rightArmTransform": {"$ref": "#/$defs/transform"}, "calibratedArmTransforms": {"type": "boolean"},
+                "lengthUnit": {"type": "string", "minLength": 1}, "angularUnit": {"type": "string", "minLength": 1}, "handedness": {"type": "string", "minLength": 1}, "outputCoordinateFrame": {"type": "string", "minLength": 1},
+                "rotationRepresentation": {"const": "quaternion"}, "rotationComponentOrder": {"const": ["X", "Y", "Z", "W"]},
+                "generatedGripperSemantics": {"type": "string", "minLength": 1}, "gripperSemanticDisclaimer": {"type": "string", "minLength": 1}, "calibratedGripperGeometry": {"const": false}
+              }
+            },
+            "jointLimitPolicy": {"enum": ["reject", "allow-with-recorded-violations"]},
+            "plans": {"type": "array", "prefixItems": [{"allOf": [{"$ref": "#/$defs/projectedPlan"}, {"properties": {"policyId": {"const": "base-pi05"}}}]}, {"allOf": [{"$ref": "#/$defs/projectedPlan"}, {"properties": {"policyId": {"const": "fine-tuned-pi05"}}}]}], "items": false, "minItems": 2, "maxItems": 2}
+          }
+        }
+      ]
+    },
+    "generatedPlan": {"type": "object", "additionalProperties": false, "required": ["policyId", "relativeTimesSeconds", "actions"], "properties": {"policyId": {"enum": ["base-pi05", "fine-tuned-pi05"]}, "relativeTimesSeconds": {"$ref": "#/$defs/times"}, "actions": {"$ref": "#/$defs/actionChunk"}}},
+    "plansPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "observationId", "actionDimension", "chunkLength", "plans", "recordedGroundTruth", "trajectoryProjection"],
+      "properties": {"schema": {"$ref": "#/$defs/version"}, "observationId": {"type": "string", "minLength": 1}, "actionDimension": {"const": 14}, "chunkLength": {"const": 50}, "plans": {"type": "array", "prefixItems": [{"allOf": [{"$ref": "#/$defs/generatedPlan"}, {"properties": {"policyId": {"const": "base-pi05"}}}]}, {"allOf": [{"$ref": "#/$defs/generatedPlan"}, {"properties": {"policyId": {"const": "fine-tuned-pi05"}}}]}], "items": false, "minItems": 2, "maxItems": 2}, "recordedGroundTruth": {"$ref": "#/$defs/recorded"}, "trajectoryProjection": {"$ref": "#/$defs/trajectoryProjection"}}
+    },
+    "manifest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "bundleId", "dataset", "observation", "comparison", "noise", "policies", "recordedGroundTruth", "payloads"],
+      "properties": {
+        "schema": {"$ref": "#/$defs/version"}, "bundleId": {"type": "string", "minLength": 1},
+        "dataset": {"type": "object", "additionalProperties": false, "required": ["repositoryId", "revision"], "properties": {"repositoryId": {"type": "string", "minLength": 1}, "revision": {"$ref": "#/$defs/sha40"}}},
+        "observation": {"type": "object", "additionalProperties": false, "required": ["observationId"], "properties": {"observationId": {"type": "string", "minLength": 1}}},
+        "comparison": {"type": "object", "additionalProperties": false, "required": ["actionDimension", "chunkLength"], "properties": {"actionDimension": {"const": 14}, "chunkLength": {"const": 50}}},
+        "noise": {"type": "object", "additionalProperties": false, "required": ["shape", "dtype", "seed", "sha256"], "properties": {"shape": {"const": [1, 50, 32]}, "dtype": {"type": "string", "minLength": 1}, "seed": {"type": "integer", "minimum": 0}, "sha256": {"$ref": "#/$defs/sha256"}}},
+        "policies": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"type": "object", "additionalProperties": false, "required": ["policyId", "label", "repositoryId", "revision"], "properties": {"policyId": {"const": "base-pi05"}, "label": {"const": "Base π0.5"}, "repositoryId": {"type": "string", "minLength": 1}, "revision": {"$ref": "#/$defs/sha40"}}}, {"type": "object", "additionalProperties": false, "required": ["policyId", "label", "repositoryId", "revision"], "properties": {"policyId": {"const": "fine-tuned-pi05"}, "label": {"const": "Fine-tuned π0.5"}, "repositoryId": {"type": "string", "minLength": 1}, "revision": {"$ref": "#/$defs/sha40"}}}], "items": false},
+        "recordedGroundTruth": {"$ref": "#/$defs/recorded"},
+        "payloads": {"type": "array", "minItems": 1, "maxItems": 1, "prefixItems": [{"type": "object", "additionalProperties": false, "required": ["kind", "filename", "encoding", "byteSize", "sha256"], "properties": {"kind": {"const": "plans"}, "filename": {"const": "plans.json"}, "encoding": {"const": "json"}, "byteSize": {"type": "integer", "minimum": 1}, "sha256": {"$ref": "#/$defs/sha256"}}}], "items": false}
+      }
+    }
+  }
+}

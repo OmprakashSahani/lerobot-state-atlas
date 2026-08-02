@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OmprakashSahani/lerobot-state-atlas/schemas/checkpoint-comparison-v1.schema.json",
+  "title": "LeRobot State Atlas checkpoint comparison v1.0",
+  "description": "Structural schema for standalone deterministic policy-plan comparison artifacts. Cross-file identity, checksums, byte counts, and ordering are additionally enforced by validate-checkpoint-comparison.",
+  "oneOf": [
+    { "$ref": "#/$defs/manifest" },
+    { "$ref": "#/$defs/plansPayload" }
+  ],
+  "$defs": {
+    "schemaVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "major", "minor"],
+      "properties": {
+        "name": { "const": "lerobot-state-atlas.checkpoint-comparison" },
+        "major": { "const": 1 },
+        "minor": { "const": 0 }
+      }
+    },
+    "sha40": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "finiteNumber": { "type": "number" },
+    "action": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 14,
+      "items": { "$ref": "#/$defs/finiteNumber" }
+    },
+    "actionChunk": {
+      "type": "array",
+      "minItems": 50,
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "relativeTimes": {
+      "type": "array",
+      "minItems": 50,
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/finiteNumber" }
+    },
+    "recordedGroundTruth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "reason"],
+          "properties": {
+            "available": { "const": false },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "reason", "relativeTimesSeconds", "actions"],
+          "properties": {
+            "available": { "const": true },
+            "reason": { "type": "null" },
+            "relativeTimesSeconds": { "$ref": "#/$defs/relativeTimes" },
+            "actions": { "$ref": "#/$defs/actionChunk" }
+          }
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyId", "label", "repositoryId", "revision"],
+      "properties": {
+        "policyId": { "enum": ["base-pi05", "fine-tuned-pi05"] },
+        "label": { "enum": ["Base π0.5", "Fine-tuned π0.5"] },
+        "repositoryId": { "type": "string", "minLength": 1 },
+        "revision": { "$ref": "#/$defs/sha40" }
+      }
+    },
+    "generatedPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyId", "relativeTimesSeconds", "actions"],
+      "properties": {
+        "policyId": { "enum": ["base-pi05", "fine-tuned-pi05"] },
+        "relativeTimesSeconds": { "$ref": "#/$defs/relativeTimes" },
+        "actions": { "$ref": "#/$defs/actionChunk" }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "bundleId", "dataset", "observation", "comparison", "noise", "policies", "recordedGroundTruth", "payloads"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "bundleId": { "type": "string", "minLength": 1 },
+        "dataset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repositoryId", "revision"],
+          "properties": {
+            "repositoryId": { "type": "string", "minLength": 1 },
+            "revision": { "$ref": "#/$defs/sha40" }
+          }
+        },
+        "observation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["observationId"],
+          "properties": { "observationId": { "type": "string", "minLength": 1 } }
+        },
+        "comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["actionDimension", "chunkLength"],
+          "properties": {
+            "actionDimension": { "const": 14 },
+            "chunkLength": { "const": 50 }
+          }
+        },
+        "noise": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["shape", "dtype", "seed", "sha256"],
+          "properties": {
+            "shape": { "const": [1, 50, 32] },
+            "dtype": { "type": "string", "minLength": 1 },
+            "seed": { "type": "integer", "minimum": 0 },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "policies": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/policy" },
+                { "properties": { "policyId": { "const": "base-pi05" }, "label": { "const": "Base π0.5" } } }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/policy" },
+                { "properties": { "policyId": { "const": "fine-tuned-pi05" }, "label": { "const": "Fine-tuned π0.5" } } }
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "recordedGroundTruth": { "$ref": "#/$defs/recordedGroundTruth" },
+        "payloads": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "filename", "encoding", "byteSize", "sha256"],
+              "properties": {
+                "kind": { "const": "plans" },
+                "filename": { "const": "plans.json" },
+                "encoding": { "const": "json" },
+                "byteSize": { "type": "integer", "minimum": 1 },
+                "sha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          ],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        }
+      }
+    },
+    "plansPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "observationId", "actionDimension", "chunkLength", "plans", "recordedGroundTruth"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "observationId": { "type": "string", "minLength": 1 },
+        "actionDimension": { "const": 14 },
+        "chunkLength": { "const": 50 },
+        "plans": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/generatedPlan" },
+                { "properties": { "policyId": { "const": "base-pi05" } } }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/generatedPlan" },
+                { "properties": { "policyId": { "const": "fine-tuned-pi05" } } }
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "recordedGroundTruth": { "$ref": "#/$defs/recordedGroundTruth" }
+      }
+    }
+  }
+}

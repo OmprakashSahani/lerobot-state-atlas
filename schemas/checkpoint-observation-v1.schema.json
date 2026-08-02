@@ -1,0 +1,321 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OmprakashSahani/lerobot-state-atlas/schemas/checkpoint-observation-v1.schema.json",
+  "title": "LeRobot State Atlas checkpoint observation v1.0",
+  "description": "Structural contract for one local policy-comparison observation. Filesystem containment, readability, hashes, decoded image metadata, cadence, and monotonicity are enforced by the Python loader.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "observationId",
+    "dataset",
+    "prompt",
+    "state",
+    "cameras",
+    "recordedGroundTruth"
+  ],
+  "properties": {
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "name": {
+          "const": "lerobot-state-atlas.checkpoint-observation"
+        },
+        "major": {
+          "const": 1
+        },
+        "minor": {
+          "const": 0
+        }
+      }
+    },
+    "observationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repoId",
+        "revision",
+        "episodeIndex",
+        "frameIndex",
+        "timestampSeconds",
+        "fps",
+        "task"
+      ],
+      "properties": {
+        "repoId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "episodeIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frameIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestampSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fps": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "task": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "featureName",
+        "dtype",
+        "componentNames",
+        "values"
+      ],
+      "properties": {
+        "featureName": {
+          "const": "observation.state"
+        },
+        "dtype": {
+          "const": "float32"
+        },
+        "componentNames": {
+          "const": [
+            "left_joint_1.pos",
+            "left_joint_2.pos",
+            "left_joint_3.pos",
+            "left_joint_4.pos",
+            "left_joint_5.pos",
+            "left_joint_6.pos",
+            "left_gripper.pos",
+            "right_joint_1.pos",
+            "right_joint_2.pos",
+            "right_joint_3.pos",
+            "right_joint_4.pos",
+            "right_joint_5.pos",
+            "right_joint_6.pos",
+            "right_gripper.pos"
+          ]
+        },
+        "values": {
+          "$ref": "#/$defs/action"
+        }
+      }
+    },
+    "cameras": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/camera"
+            },
+            {
+              "properties": {
+                "featureName": {
+                  "const": "observation.images.left_wrist"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/camera"
+            },
+            {
+              "properties": {
+                "featureName": {
+                  "const": "observation.images.right_wrist"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/camera"
+            },
+            {
+              "properties": {
+                "featureName": {
+                  "const": "observation.images.top"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "recordedGroundTruth": {
+      "$ref": "#/$defs/recordedGroundTruth"
+    }
+  },
+  "$defs": {
+    "finiteNumber": {
+      "type": "number"
+    },
+    "action": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 14,
+      "items": {
+        "$ref": "#/$defs/finiteNumber"
+      }
+    },
+    "actionChunk": {
+      "type": "array",
+      "minItems": 50,
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "componentNames": {
+      "const": [
+        "left_joint_1.pos",
+        "left_joint_2.pos",
+        "left_joint_3.pos",
+        "left_joint_4.pos",
+        "left_joint_5.pos",
+        "left_joint_6.pos",
+        "left_gripper.pos",
+        "right_joint_1.pos",
+        "right_joint_2.pos",
+        "right_joint_3.pos",
+        "right_joint_4.pos",
+        "right_joint_5.pos",
+        "right_joint_6.pos",
+        "right_gripper.pos"
+      ]
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "featureName",
+        "filename",
+        "width",
+        "height",
+        "channels",
+        "byteCount",
+        "sha256"
+      ],
+      "properties": {
+        "featureName": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "width": {
+          "const": 224
+        },
+        "height": {
+          "const": 224
+        },
+        "channels": {
+          "const": 3
+        },
+        "byteCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "recordedGroundTruth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "const": false
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "componentNames",
+            "actions",
+            "relativeTimesSeconds",
+            "frameIndices"
+          ],
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "componentNames": {
+              "$ref": "#/$defs/componentNames"
+            },
+            "actions": {
+              "$ref": "#/$defs/actionChunk"
+            },
+            "relativeTimesSeconds": {
+              "type": "array",
+              "minItems": 50,
+              "maxItems": 50,
+              "items": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "frameIndices": {
+              "type": "array",
+              "minItems": 50,
+              "maxItems": 50,
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
