@@ -1,0 +1,15 @@
+export const LOCAL_ENVIRONMENT_ROOT = "/environment-data/__local-synthetic__/";
+export const LOCAL_ENVIRONMENT_MANIFEST_ENV =
+  "NEXT_PUBLIC_LOCAL_ENVIRONMENT_MANIFEST";
+export const MAX_ENVIRONMENT_MANIFEST_BYTES = 64 * 1024;
+export const MAX_ENVIRONMENT_ASSET_BYTES = 8 * 1024 * 1024;
+export const MAX_ENVIRONMENT_SPLATS = 100_000;
+export const SPZ_HEADER_BYTES = 16;
+export const MAX_SPZ_HEADER_OUTPUT_BYTES = 64 * 1024;
+export const SPZ_MAGIC = 0x5053474e;
+export const SPZ_VERSION = 3;
+export const SPZ_SH_DEGREE = 0;
+export const SPZ_FRACTIONAL_BITS_MIN = 8;
+export const SPZ_FRACTIONAL_BITS_MAX = 16;
+export const SPZ_FLAG_ANTIALIASED = 0x01;
+export const SPZ_ALLOWED_FLAGS = SPZ_FLAG_ANTIALIASED;

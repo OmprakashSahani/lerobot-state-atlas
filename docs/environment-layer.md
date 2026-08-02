@@ -56,15 +56,66 @@ Synthetic manifests are permitted only in test fixtures. They must use
 that they are synthetic in their description. They must never be referenced by
 the production demo or presented as real reconstruction evidence.
 
-## Available manifests reserved for a later phase
+## Desktop-only local renderer spike
 
-The available branch records provenance, canonical alignment, bounds, and an
-integrity-addressed static asset reference. Version 1 reserves SPZ as its single
-asset format so that future loaders can reject unknown formats deterministically.
-This contract does not implement a loader, parser, renderer, download policy,
-WASM module, worker, or cross-origin fetch.
+The repository contains a compatibility spike pinned to
+`@sparkjsdev/spark@2.1.0`. It is disabled in production and cannot change the
+production demo's unavailable capability. Development activation requires
+`NEXT_PUBLIC_LOCAL_ENVIRONMENT_MANIFEST` to name a canonical manifest below
+`/environment-data/__local-synthetic__/`. Conservative mobile user-agent
+signals refuse the spike before a manifest request or Spark import; this is not
+a permanent device classifier.
 
-Before an available environment can be enabled in production, a later roadmap
-phase must define and test byte and splat-count limits, same-origin path
-resolution, bounded fetching, byte-size and SHA-256 verification, malformed
-asset handling, device capability behavior, GPU cleanup, and mobile opt-in.
+Nothing is requested until **Load synthetic environment** is selected. The
+application fetches the manifest under a 64 KiB cap with no redirects, validates
+environment-layer v1.0 semantics, and resolves its single-segment asset inside
+the same directory. It streams the SPZ under an 8 MiB cap, checks declared and
+actual byte counts, verifies lowercase SHA-256, and only then starts bounded
+gzip header inspection. Spark receives only verified bytes; its URL, stream,
+paging, and LOD loading are disabled.
+
+The spike accepts only SPZ v3 with spherical-harmonic degree 0, 1 through
+100,000 splats, a zero reserved byte, fractional bits from 8 through 16, and the
+basic `0x01` antialias flag. The LOD flag and unknown flags are rejected. Header,
+manifest, and decoded counts must agree. The fractional-bit range includes the
+generator's fixed value of 12 while avoiding unsafe shifts and extreme
+quantization.
+
+Header preflight is not complete semantic validation of every Gaussian. Spark
+performs final decoding. Production remains blocked pending decoded finite/range
+validation, profiling, and renderer compatibility evidence.
+
+### Deterministic synthetic fixture
+
+```bash
+cd apps/web
+npm run environment:stage
+NEXT_PUBLIC_LOCAL_ENVIRONMENT_MANIFEST=/environment-data/__local-synthetic__/manifest.json npm run dev
+```
+
+The staging command writes only `manifest.json` and
+`synthetic-environment.spz` beneath the ignored local synthetic root and refuses
+a different output root. The application-owned fixture contains a reference
+plane, colored axes, rotated anisotropic Gaussians, overlap, and varied opacity.
+It is labelled **Synthetic test environment — not a real reconstruction** and
+makes no calibration claim.
+
+Hide preserves loaded GPU resources; Show reuses them. Unload and final teardown
+explicitly dispose the Spark mesh and renderer. Fetches are abortable and
+generation tokens prevent stale attachment. Spark's pooled decoder cannot be
+cancelled and may finish after unmount, at which point the stale result is
+disposed. Stable 2.1.0 also retains pooled workers/WASM and predates upstream
+shared-renderer state fixes.
+
+Manual Chrome testing confirmed that Spark 2.1.0 initializes its embedded WASM
+through `fetch(data:application/wasm;base64,...)`. The local development policy
+therefore adds `data:` narrowly to `connect-src`; production retains
+`connect-src 'self'`. Blob workers execute under `worker-src 'self' blob:`.
+No new `unsafe-eval` allowance and no `wasm-unsafe-eval` allowance were added.
+The generated fixture root is excluded by both `.gitignore` and
+`apps/web/.vercelignore`, and staging tests remove generated assets after use.
+
+Production enablement still requires a validated real scan, provenance and
+calibration evidence, stronger decoded-value validation, worker/cancellation
+decisions, performance measurements, CSP proof, and shared-canvas visual and
+cleanup acceptance.

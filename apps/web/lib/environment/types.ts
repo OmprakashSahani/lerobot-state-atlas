@@ -68,3 +68,11 @@ export const demoEnvironmentCapability: EnvironmentCapability = {
   reason:
     "No validated Gaussian Splat scan or environment-to-robot calibration is bundled with this demo.",
 };
+
+export interface ValidatedEnvironmentRenderRequest {
+  generation: number;
+  manifest: AvailableEnvironmentManifest;
+  bytes: Uint8Array;
+  splatCount: number;
+  visible: boolean;
+}
