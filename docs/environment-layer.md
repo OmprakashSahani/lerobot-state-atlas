@@ -51,6 +51,13 @@ or application failure. No reconstruction or calibrated alignment may be
 claimed without a validated real scan, documented provenance, and calibration
 evidence.
 
+The public [phone capture guide](/capture-guide) documents environment capture,
+calibration evidence, validation, and the evidence gate for
+`reconstructionClaim: "documented-real-scan"`. That gate is documented policy,
+not a schema-enforced evidence object: environment-layer v1.0 represents the
+claim but does not embed or validate its supporting evidence. The production
+unavailable state and all synthetic-fixture restrictions below remain unchanged.
+
 Synthetic manifests are permitted only in test fixtures. They must use
 `sourceKind: "synthetic-test"`, set `reconstructionClaim` to `false`, and say
 that they are synthetic in their description. They must never be referenced by
