@@ -28,6 +28,9 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Local-only generated Gaussian Splat compatibility fixture
+apps/web/public/environment-data/__local-synthetic__/
+
 # PyInstaller
 #   Usually these files are written by a python script from a template
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.

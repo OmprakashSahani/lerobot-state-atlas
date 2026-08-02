@@ -14,6 +14,7 @@ import {
 } from "@/lib/data/loadBundle";
 import { formatEpisodeSelection } from "@/lib/data/episodeSelection";
 import { demoEnvironmentCapability } from "@/lib/environment/types";
+import { useLocalEnvironmentSpike } from "@/lib/environment/use-local-environment";
 import { queryRadius } from "@/lib/data/radiusQuery";
 import {
   advancePlayback,
@@ -54,6 +55,7 @@ function formatMetric(value: number, metric: CoverageMetric) {
 export function AtlasViewer() {
   const atlas = useAtlasData();
   const viewer = useViewerStore();
+  const localEnvironment = useLocalEnvironmentSpike();
   const [trajectories, setTrajectories] = useState<TrajectoryState>({
     status: "idle",
   });
@@ -370,6 +372,10 @@ export function AtlasViewer() {
             orientationEpisode={orientationEpisode}
             recordedGripperEpisode={recordedGripperEpisode}
             playbackFrame={playback.frame}
+            environmentRequest={localEnvironment.request}
+            onEnvironmentPhase={localEnvironment.onRendererPhase}
+            onEnvironmentError={localEnvironment.onRendererError}
+            onWebGl2Support={localEnvironment.setWebGl2Supported}
           />
           <div className="scene-badge"><span className="live-dot" aria-hidden="true" />Canonical shared world</div>
           <p className="scene-help">Click a voxel to query · Drag to orbit · Scroll to zoom</p>
@@ -492,7 +498,7 @@ export function AtlasViewer() {
           <label className="layer-toggle simple-toggle"><input checked={viewer.autoRotate} onChange={(event) => viewer.setAutoRotate(event.target.checked)} type="checkbox" />Auto rotate</label>
         </section>
 
-        <EnvironmentStatus capability={demoEnvironmentCapability} />
+        <EnvironmentStatus capability={demoEnvironmentCapability} local={localEnvironment} />
 
         <section className="control-section robot-setup" aria-labelledby="robot-setup-heading">
           <div className="section-title-row"><h2 id="robot-setup-heading">Robot setup</h2><span>Provisional geometry</span></div>

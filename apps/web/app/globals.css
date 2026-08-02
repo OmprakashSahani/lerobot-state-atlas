@@ -1205,6 +1205,26 @@ a {
   padding: 0.7rem;
 }
 
+.local-environment-controls {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.local-environment-controls > strong {
+  color: var(--cyan);
+  display: block;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  margin-top: 0.85rem;
+}
+
+.environment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
 .arm-dot {
   border-radius: 50%;
   height: 7px;

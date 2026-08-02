@@ -346,12 +346,13 @@ selection queries, and trajectories. The manifest's current `0.8 m` baseline is
 provisional configurable geometry, not calibrated geometry.
 
 The viewer exposes an independent environment-layer v1.0 contract and an honest
-unavailable state: no validated Gaussian Splat scan or environment-to-robot
-calibration is bundled with the production demo. The analytical grid and robot
-workspace viewer remain fully available. The contract is intentionally
-independent of coverage, selection, playback, synchronized media, and episode
-analysis. A renderer, asset loader, scan upload, and calibration UI remain
-future work; see [the environment-layer contract](docs/environment-layer.md).
+production unavailable state: no validated Gaussian Splat scan or
+environment-to-robot calibration is bundled. A disabled-by-default,
+desktop-only local Spark/SPZ compatibility spike uses a generated,
+application-owned synthetic fixture. It is not production Gaussian Splat
+support or a real reconstruction. The analytical grid and robot workspace
+viewer remain fully available; see
+[the environment-layer contract](docs/environment-layer.md).
 
 Generate the pinned demo bundle:
 

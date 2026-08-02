@@ -10,6 +10,7 @@
     "dev": "next dev",
     "build": "next build",
     "benchmark:stage": "node scripts/stage-local-benchmark.mjs",
+    "environment:stage": "node scripts/generate-synthetic-spz.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
@@ -17,6 +18,7 @@
   },
   "dependencies": {
     "@react-three/fiber": "^9.4.0",
+    "@sparkjsdev/spark": "2.1.0",
     "next": "^16.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

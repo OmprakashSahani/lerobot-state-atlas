@@ -15,8 +15,10 @@ import type {
   TrajectoryEpisodeOrientations,
   TrajectoryEpisodeRecordedGripperValues,
 } from "@/lib/atlas-schema/types";
+import type { ValidatedEnvironmentRenderRequest } from "@/lib/environment/types";
 
 import { EnvironmentLayer, gridEnvironment } from "./EnvironmentLayer";
+import { SparkEnvironmentAdapter, type SparkAdapterPhase } from "./SparkEnvironmentAdapter";
 import { InteractionLayer } from "./InteractionLayer";
 import { RobotDataLayer } from "./RobotDataLayer";
 import { useViewerStore } from "./ViewerStore";
@@ -87,12 +89,20 @@ export function ViewerCanvas({
   orientationEpisode,
   recordedGripperEpisode,
   playbackFrame,
+  environmentRequest,
+  onEnvironmentPhase,
+  onEnvironmentError,
+  onWebGl2Support,
 }: {
   data: AtlasData;
   episode: TrajectoryEpisode | null;
   orientationEpisode: TrajectoryEpisodeOrientations | null;
   recordedGripperEpisode: TrajectoryEpisodeRecordedGripperValues | null;
   playbackFrame: number;
+  environmentRequest: ValidatedEnvironmentRenderRequest | null;
+  onEnvironmentPhase: (generation: number, phase: SparkAdapterPhase) => void;
+  onEnvironmentError: (generation: number, message: string) => void;
+  onWebGl2Support: (supported: boolean) => void;
 }) {
   return (
     <Canvas
@@ -101,6 +111,7 @@ export function ViewerCanvas({
       gl={{ antialias: true, powerPreference: "high-performance" }}
       onCreated={({ gl }) => {
         gl.setClearColor("#06101a");
+        onWebGl2Support(gl.capabilities.isWebGL2);
       }}
     >
       <ambientLight intensity={0.8} />
@@ -111,6 +122,11 @@ export function ViewerCanvas({
         position={[-2, 1, -2]}
       />
       <EnvironmentLayer source={gridEnvironment} />
+      <SparkEnvironmentAdapter
+        request={environmentRequest}
+        onPhase={onEnvironmentPhase}
+        onError={onEnvironmentError}
+      />
       <RobotDataLayer data={data} />
       <InteractionLayer
         data={data}

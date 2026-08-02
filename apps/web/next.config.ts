@@ -20,6 +20,8 @@ const frameSources = isVercelPreview
 
 if (isDevelopment) {
   scriptSources.push("'unsafe-eval'");
+  // Spark 2.1.0 initializes embedded WASM through fetch(data:...) in the local-only spike.
+  connectSources.push("data:");
 }
 
 if (isVercelPreview) {
