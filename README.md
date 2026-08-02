@@ -345,10 +345,13 @@ negative delta. The same adjustment applies to coverage, base references,
 selection queries, and trajectories. The manifest's current `0.8 m` baseline is
 provisional configurable geometry, not calibrated geometry.
 
-Gaussian-splat environments, scan upload, and calibration UI remain future
-work. The environment layer is intentionally independent of coverage,
-selection, and playback so those additions do not require coupling robotics
-data to a future environment renderer.
+The viewer exposes an independent environment-layer v1.0 contract and an honest
+unavailable state: no validated Gaussian Splat scan or environment-to-robot
+calibration is bundled with the production demo. The analytical grid and robot
+workspace viewer remain fully available. The contract is intentionally
+independent of coverage, selection, playback, synchronized media, and episode
+analysis. A renderer, asset loader, scan upload, and calibration UI remain
+future work; see [the environment-layer contract](docs/environment-layer.md).
 
 Generate the pinned demo bundle:
 

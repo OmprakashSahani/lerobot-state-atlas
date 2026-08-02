@@ -1167,6 +1167,44 @@ a {
   font-size: 0.65rem;
 }
 
+.environment-status dl {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.environment-status dl div {
+  align-items: baseline;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.environment-status dt,
+.environment-status dd {
+  font-size: 0.67rem;
+  margin: 0;
+}
+
+.environment-status dt {
+  color: var(--muted);
+}
+
+.environment-status dd {
+  font-weight: 700;
+  text-align: right;
+}
+
+.environment-status p {
+  background: rgba(103, 232, 249, 0.06);
+  border-left: 2px solid rgba(103, 232, 249, 0.45);
+  color: var(--muted);
+  font-size: 0.67rem;
+  line-height: 1.5;
+  margin: 0.8rem 0 0;
+  padding: 0.7rem;
+}
+
 .arm-dot {
   border-radius: 50%;
   height: 7px;

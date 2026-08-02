@@ -1,0 +1,35 @@
+{
+  "schema": {
+    "name": "lerobot-state-atlas.environment-layer",
+    "major": 1,
+    "minor": 0
+  },
+  "environmentId": "synthetic-contract-test",
+  "label": "Synthetic contract test environment — not a real reconstruction",
+  "status": "available",
+  "provenance": {
+    "sourceKind": "synthetic-test",
+    "description": "Synthetic metadata fixture for contract tests only; not a real reconstruction.",
+    "reconstructionClaim": false
+  },
+  "coordinateFrame": "canonical-shared-world",
+  "alignment": {
+    "translationXyz": [0, 0, 0],
+    "rotationXyzw": [0, 0, 0, 1],
+    "uniformScale": 1,
+    "calibrated": false,
+    "disclosure": "Synthetic identity transform for tests only; no physical calibration is claimed."
+  },
+  "bounds": {
+    "minimumXyz": [-1, -1, -1],
+    "maximumXyz": [1, 1, 1]
+  },
+  "asset": {
+    "filename": "synthetic-contract-test.spz",
+    "format": "spz",
+    "mimeType": "application/octet-stream",
+    "byteSize": 128,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "splatCount": 4
+  }
+}
