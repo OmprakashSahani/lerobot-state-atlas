@@ -28,6 +28,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <nav aria-label="Primary navigation">
             <Link href="/checkpoint-comparison">Checkpoint comparison</Link>
             <Link href="/methodology">Methodology</Link>
+            <Link href="/capture-guide">Capture guide</Link>
             <a
               href="https://github.com/OmprakashSahani/lerobot-state-atlas"
               rel="noreferrer"

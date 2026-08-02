@@ -26,6 +26,9 @@ export default function HomePage() {
             <Link className="button button-secondary" href="/methodology">
               Read the methodology
             </Link>
+            <Link className="button button-secondary" href="/capture-guide">
+              Plan a workspace capture
+            </Link>
             <Link className="button button-secondary" href="/checkpoint-comparison">
               Compare checkpoints
             </Link>

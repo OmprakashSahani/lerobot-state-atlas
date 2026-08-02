@@ -1442,19 +1442,31 @@ a {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 760px) {
   .site-header {
-    padding: 0 1rem;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.6rem;
+    height: auto;
+    padding: 0.8rem 1rem;
   }
 
   .site-header nav {
-    gap: 0.9rem;
+    display: grid;
+    gap: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
   }
 
-  .site-header nav a:first-child {
-    display: none;
+  .site-header nav a {
+    align-items: center;
+    display: flex;
+    min-height: 44px;
+    padding-right: 0.7rem;
   }
+}
 
+@media (max-width: 640px) {
   .hero {
     padding: 5rem 1.1rem;
   }

@@ -12,6 +12,8 @@ import manifestJson from "@/public/atlas-data/demo-v2/manifest.json";
 import coverageJson from "@/public/atlas-data/demo-v2/coverage.json";
 import trajectoriesJson from "@/public/atlas-data/demo-v2/trajectories.json";
 import HomePage from "@/app/page";
+import CaptureGuidePage from "@/app/capture-guide/page";
+import RootLayout from "@/app/layout";
 import MethodologyPage from "@/app/methodology/page";
 import { AtlasViewer } from "@/components/viewer/AtlasViewer";
 import {
@@ -293,7 +295,37 @@ describe("accessible product content", () => {
     expect(
       screen.getByRole("link", { name: "Open shared-world viewer" }),
     ).toHaveAttribute("href", "/viewer/demo");
+    expect(
+      screen.getByRole("link", { name: "Plan a workspace capture" }),
+    ).toHaveAttribute("href", "/capture-guide");
     expect(screen.getByText(/not calibrated physical geometry/i)).toBeVisible();
+  });
+
+  it("preserves primary navigation and exposes the capture guide", () => {
+    render(
+      <RootLayout>
+        <div>Page content</div>
+      </RootLayout>,
+    );
+
+    const navigation = screen.getByRole("navigation", {
+      name: "Primary navigation",
+    });
+    expect(
+      within(navigation).getByRole("link", { name: "Checkpoint comparison" }),
+    ).toHaveAttribute("href", "/checkpoint-comparison");
+    expect(
+      within(navigation).getByRole("link", { name: "Methodology" }),
+    ).toHaveAttribute("href", "/methodology");
+    expect(
+      within(navigation).getByRole("link", { name: "Capture guide" }),
+    ).toHaveAttribute("href", "/capture-guide");
+    expect(
+      within(navigation).getByRole("link", { name: "GitHub" }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/OmprakashSahani/lerobot-state-atlas",
+    );
   });
 
   it("documents tool-point counting semantics", () => {
@@ -302,6 +334,85 @@ describe("accessible product content", () => {
     expect(
       screen.getByText(/single dataset frame can contribute two tool points/i),
     ).toBeVisible();
+  });
+
+  it("presents the capture guide with semantic navigation and honest scope", () => {
+    render(<CaptureGuidePage />);
+
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Capture a robot workspace for later reconstruction.",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("navigation", { name: "Capture guide contents" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/does not contain a validated real scan, calibrated alignment, or production reconstruction today/i),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/phone video alone does not establish synchronization or alignment/i),
+    ).toBeVisible();
+    expect(screen.getByText(/scale recovery is not frame alignment/i)).toBeVisible();
+    expect(
+      screen.getByText(/visually convincing splat is not proof of geometric accuracy/i),
+    ).toBeVisible();
+  });
+
+  it("distinguishes capture workflows and covers the required field guide sections", () => {
+    render(<CaptureGuidePage />);
+
+    expect(screen.getByRole("heading", { name: "Environment capture" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Synchronized robot-dataset recording" }),
+    ).toBeVisible();
+
+    for (const name of [
+      "Prerequisites and safety",
+      "Prepare the workspace",
+      "Set up the phone",
+      "Capture the workspace",
+      "Lighting and difficult surfaces",
+      "Scale, robot pose, and shared-world alignment",
+      "Organize files and metadata",
+      "Reconstruct and validate",
+      "Failure cases and recovery",
+      "Privacy and governance",
+      "Evidence gate for documented-real-scan",
+      "Final acceptance checklist",
+    ]) {
+      expect(screen.getByRole("heading", { level: 2, name })).toBeVisible();
+    }
+    expect(screen.getByRole("link", { name: "Read the methodology" })).toHaveAttribute(
+      "href",
+      "/methodology",
+    );
+    expect(
+      screen.getByRole("link", { name: /Read the environment-layer contract/ }),
+    ).toHaveAttribute("href", expect.stringContaining("docs/environment-layer.md"));
+  });
+
+  it("defines the documented-real-scan evidence gate and static acceptance criteria", () => {
+    render(<CaptureGuidePage />);
+
+    const gate = screen
+      .getByRole("heading", { name: "Evidence gate for documented-real-scan" })
+      .closest("section");
+    expect(gate).not.toBeNull();
+    expect(within(gate!).getByText(/immutable original capture inventory/i)).toBeVisible();
+    expect(within(gate!).getByText(/independent validation points/i)).toBeVisible();
+    expect(within(gate!).getByText(/traceable reviewer identity/i)).toBeVisible();
+    expect(gate).toHaveTextContent(
+      /reconstructionClaim must remain false\s*whenever required evidence is missing, contradictory, or outside predeclared tolerances/i,
+    );
+
+    const checklist = screen
+      .getByRole("heading", { name: "Final acceptance checklist" })
+      .closest("section");
+    expect(checklist).not.toBeNull();
+    expect(within(checklist!).getAllByRole("list")).toHaveLength(3);
+    expect(within(checklist!).queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
   it("labels viewer controls and preserves the spacing disclosure", () => {

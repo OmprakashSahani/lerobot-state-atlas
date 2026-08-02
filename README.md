@@ -354,6 +354,11 @@ support or a real reconstruction. The analytical grid and robot workspace
 viewer remain fully available; see
 [the environment-layer contract](docs/environment-layer.md).
 
+The public `/capture-guide` route documents tool-neutral phone capture,
+calibration evidence, validation, and the evidence gate for a
+`documented-real-scan` claim. It is guidance for producing reviewable future
+evidence, not a claim that a real or production-ready reconstruction exists.
+
 Generate the pinned demo bundle:
 
     uv run lerobot-state-atlas export-browser-data \
