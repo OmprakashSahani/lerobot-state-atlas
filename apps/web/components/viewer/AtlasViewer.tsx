@@ -13,6 +13,7 @@ import {
   loadTrajectories,
 } from "@/lib/data/loadBundle";
 import { formatEpisodeSelection } from "@/lib/data/episodeSelection";
+import { demoEnvironmentCapability } from "@/lib/environment/types";
 import { queryRadius } from "@/lib/data/radiusQuery";
 import {
   advancePlayback,
@@ -23,6 +24,7 @@ import {
   type PlaybackState,
 } from "@/lib/playback/controller";
 import { ViewerCanvas } from "./ViewerCanvas";
+import { EnvironmentStatus } from "./EnvironmentStatus";
 import {
   EpisodeAnalysisPanel,
   type TrajectoryState,
@@ -489,6 +491,8 @@ export function AtlasViewer() {
           <label className="layer-toggle"><input checked={viewer.rightVisible} onChange={() => viewer.toggleArm("right")} type="checkbox" /><span className="arm-dot arm-dot-right" aria-hidden="true" />Right arm entries<strong>{preparedArms[1].visits.length.toLocaleString()}</strong></label>
           <label className="layer-toggle simple-toggle"><input checked={viewer.autoRotate} onChange={(event) => viewer.setAutoRotate(event.target.checked)} type="checkbox" />Auto rotate</label>
         </section>
+
+        <EnvironmentStatus capability={demoEnvironmentCapability} />
 
         <section className="control-section robot-setup" aria-labelledby="robot-setup-heading">
           <div className="section-title-row"><h2 id="robot-setup-heading">Robot setup</h2><span>Provisional geometry</span></div>

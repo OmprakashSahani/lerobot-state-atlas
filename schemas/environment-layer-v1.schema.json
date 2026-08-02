@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OmprakashSahani/lerobot-state-atlas/schemas/environment-layer-v1.schema.json",
+  "title": "LeRobot State Atlas environment layer v1.0",
+  "description": "A render-only environment capability contract. It is independent from robot analytical browser data and does not itself establish reconstruction or calibration validity.",
+  "oneOf": [
+    { "$ref": "#/$defs/availableManifest" },
+    { "$ref": "#/$defs/unavailableManifest" }
+  ],
+  "$defs": {
+    "schemaVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "major", "minor"],
+      "properties": {
+        "name": { "const": "lerobot-state-atlas.environment-layer" },
+        "major": { "const": 1 },
+        "minor": { "const": 0 }
+      }
+    },
+    "vector3": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "items": false
+    },
+    "quaternionXyzw": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" },
+        { "type": "number" }
+      ],
+      "items": false
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceKind", "description", "reconstructionClaim"],
+      "properties": {
+        "sourceKind": { "enum": ["real-scan", "synthetic-test"] },
+        "description": { "type": "string", "minLength": 1 },
+        "reconstructionClaim": {
+          "oneOf": [
+            { "const": false },
+            { "const": "documented-real-scan" }
+          ]
+        }
+      }
+    },
+    "alignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "translationXyz",
+        "rotationXyzw",
+        "uniformScale",
+        "calibrated",
+        "disclosure"
+      ],
+      "properties": {
+        "translationXyz": { "$ref": "#/$defs/vector3" },
+        "rotationXyzw": { "$ref": "#/$defs/quaternionXyzw" },
+        "uniformScale": { "type": "number", "exclusiveMinimum": 0 },
+        "calibrated": { "type": "boolean" },
+        "disclosure": { "type": "string", "minLength": 1 }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumXyz", "maximumXyz"],
+      "properties": {
+        "minimumXyz": { "$ref": "#/$defs/vector3" },
+        "maximumXyz": { "$ref": "#/$defs/vector3" }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filename",
+        "format",
+        "mimeType",
+        "byteSize",
+        "sha256",
+        "splatCount"
+      ],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+\\.spz$"
+        },
+        "format": { "const": "spz" },
+        "mimeType": { "const": "application/octet-stream" },
+        "byteSize": { "type": "integer", "minimum": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "splatCount": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "common": {
+      "type": "object",
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "coordinateFrame": { "const": "canonical-shared-world" }
+      }
+    },
+    "availableManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "environmentId",
+        "label",
+        "status",
+        "provenance",
+        "coordinateFrame",
+        "alignment",
+        "bounds",
+        "asset"
+      ],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "status": { "const": "available" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "coordinateFrame": { "const": "canonical-shared-world" },
+        "alignment": { "$ref": "#/$defs/alignment" },
+        "bounds": { "$ref": "#/$defs/bounds" },
+        "asset": { "$ref": "#/$defs/asset" }
+      }
+    },
+    "unavailableManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "environmentId",
+        "label",
+        "status",
+        "provenance",
+        "coordinateFrame",
+        "unavailableReason"
+      ],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "status": { "const": "unavailable" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "coordinateFrame": { "const": "canonical-shared-world" },
+        "unavailableReason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
