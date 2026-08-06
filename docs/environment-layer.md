@@ -63,6 +63,24 @@ Synthetic manifests are permitted only in test fixtures. They must use
 that they are synthetic in their description. They must never be referenced by
 the production demo or presented as real reconstruction evidence.
 
+### Real-capture feasibility result
+
+A private phone video was processed locally with COLMAP at 4 FPS. Of 259
+extracted frames, 227 unique frames registered across four sparse models. The
+main model registered 167 images with 68,630 points, 282,087 observations, a
+mean track length of 4.110258, and a COLMAP-reported mean reprojection error of
+0.852467 px. Visual inspection showed a coherent workcell and plausible camera
+path.
+
+COLMAP successfully undistorted the main model's 167 images into a 111 MB
+training dataset. This establishes sparse-reconstruction and dataset-preparation
+feasibility only: no Gaussian Splat has been trained, validated, aligned to the
+robot frame, or packaged for the renderer.
+
+The private video, extracted frames, databases, sparse models, undistorted
+dataset, and generated assets remain under ignored `.cache/`. Production remains
+unavailable, and the immutable `demo-v1` and `demo-v2` bundles are unchanged.
+
 ## Desktop-only local renderer spike
 
 The repository contains a compatibility spike pinned to
