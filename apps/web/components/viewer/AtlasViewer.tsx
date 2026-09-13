@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import type {
   EpisodeVideoPayload,
@@ -15,6 +22,23 @@ import {
 import { formatEpisodeSelection } from "@/lib/data/episodeSelection";
 import { demoEnvironmentCapability } from "@/lib/environment/types";
 import { useLocalEnvironmentSpike } from "@/lib/environment/use-local-environment";
+import {
+  clampSupportedCameraIndex,
+  isViewingConstraintDebugEnabled,
+  knownGoodCapturedCamera,
+  loadReviewedCameraManifold,
+  resetSupportedCameraIndex,
+  shouldConstrainGaussianViewing,
+  type SupportedCameraManifold,
+} from "@/lib/environment/camera-viewing-constraint";
+import {
+  isIntegratedPerformanceDiagnosticEnabled,
+  INTEGRATED_SOURCE_SWITCH_CYCLE,
+  SOURCE_SWITCH_STABILIZED_FRAME_TARGET,
+  type IntegratedEnvironmentPerformanceMetrics,
+  type IntegratedEnvironmentSource,
+  type SparkResourceLifecycleEvent,
+} from "@/lib/environment/integrated-performance-diagnostic";
 import { queryRadius } from "@/lib/data/radiusQuery";
 import {
   advancePlayback,
@@ -24,7 +48,10 @@ import {
   shouldSeekEpisodeVideo,
   type PlaybackState,
 } from "@/lib/playback/controller";
-import { ViewerCanvas } from "./ViewerCanvas";
+import {
+  ViewerCanvas,
+  type GaussianViewingTelemetry,
+} from "./ViewerCanvas";
 import { EnvironmentStatus } from "./EnvironmentStatus";
 import {
   EpisodeAnalysisPanel,
@@ -38,6 +65,20 @@ type EpisodeVideoState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; data: EpisodeVideoPayload };
+
+type EnvironmentCameraState =
+  | { status: "idle" }
+  | { status: "error"; environmentId: string; message: string }
+  | {
+      status: "ready";
+      environmentId: string;
+      manifold: SupportedCameraManifold;
+    };
+
+type CurrentEnvironmentCameraState =
+  | { status: "idle" | "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; manifold: SupportedCameraManifold };
 
 const metricDescriptions: Record<CoverageMetric, string> = {
   visits: "Raw arm-specific tool-point visits",
@@ -56,6 +97,53 @@ export function AtlasViewer() {
   const atlas = useAtlasData();
   const viewer = useViewerStore();
   const localEnvironment = useLocalEnvironmentSpike();
+  const environmentDiagnosticEnabled = useSyncExternalStore(
+    () => () => undefined,
+    () =>
+      isIntegratedPerformanceDiagnosticEnabled(
+        process.env.NODE_ENV,
+        window.location.search,
+      ),
+    () => false,
+  );
+  const viewingConstraintDebugEnabled = useSyncExternalStore(
+    () => () => undefined,
+    () =>
+      isViewingConstraintDebugEnabled(
+        process.env.NODE_ENV,
+        window.location.search,
+      ),
+    () => false,
+  );
+  const [environmentDiagnosticSelection, setEnvironmentDiagnosticSelection] =
+    useState<{
+      source: IntegratedEnvironmentSource;
+      requestedAt: number;
+      switchToken: number;
+    }>({
+      source: "current",
+      requestedAt: 0,
+      switchToken: 0,
+    });
+  const [environmentPerformanceMetrics, setEnvironmentPerformanceMetrics] =
+    useState<IntegratedEnvironmentPerformanceMetrics | null>(null);
+  const [environmentLifecycleEvents, setEnvironmentLifecycleEvents] = useState<
+    SparkResourceLifecycleEvent[]
+  >([]);
+  const [sourceSwitchCycle, setSourceSwitchCycle] = useState({
+    running: false,
+    sequenceIndex: 0,
+  });
+  const sourceSwitchCycleRef = useRef(sourceSwitchCycle);
+  const [environmentCameraState, setEnvironmentCameraState] =
+    useState<EnvironmentCameraState>({ status: "idle" });
+  const [environmentCameraIndex, setEnvironmentCameraIndex] = useState(0);
+  const [environmentCameraTelemetry, setEnvironmentCameraTelemetry] =
+    useState<GaussianViewingTelemetry | null>(null);
+  const fallbackEnvironmentCamera = useMemo(
+    () => knownGoodCapturedCamera(),
+    [],
+  );
   const [trajectories, setTrajectories] = useState<TrajectoryState>({
     status: "idle",
   });
@@ -82,6 +170,161 @@ export function AtlasViewer() {
   const episodeVideoLoadRef = useRef<Promise<EpisodeVideoPayload> | null>(null);
   const requestedEpisodeIdRef = useRef<number | null>(null);
   const [playbackFocusToken, setPlaybackFocusToken] = useState(0);
+
+  const realEnvironmentRequest =
+    localEnvironment.request?.manifest.provenance.sourceKind === "real-scan"
+      ? localEnvironment.request
+      : null;
+  const realEnvironmentId = realEnvironmentRequest?.manifest.environmentId;
+
+  useEffect(() => {
+    if (!realEnvironmentId) return;
+    const controller = new AbortController();
+    void loadReviewedCameraManifold(
+      controller.signal,
+      window.location.origin,
+    )
+      .then((manifold) => {
+        setEnvironmentCameraState({
+          status: "ready",
+          environmentId: realEnvironmentId,
+          manifold,
+        });
+        setEnvironmentCameraIndex(resetSupportedCameraIndex(manifold));
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setEnvironmentCameraState({
+          status: "error",
+          environmentId: realEnvironmentId,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Captured-camera support data failed to load.",
+        });
+      });
+    return () => controller.abort();
+  }, [realEnvironmentId]);
+
+  const currentEnvironmentCameraState: CurrentEnvironmentCameraState =
+    !realEnvironmentId
+      ? { status: "idle" }
+      : environmentCameraState.status !== "idle" &&
+          environmentCameraState.environmentId === realEnvironmentId
+        ? environmentCameraState
+        : { status: "loading" };
+  const environmentCameraManifold =
+    currentEnvironmentCameraState.status === "ready"
+      ? currentEnvironmentCameraState.manifold
+      : null;
+  const selectedEnvironmentCamera = environmentCameraManifold
+    ? environmentCameraManifold.cameras[
+        clampSupportedCameraIndex(
+          environmentCameraIndex,
+          environmentCameraManifold,
+        )
+      ]
+    : fallbackEnvironmentCamera;
+  const gaussianViewingConstraint = useMemo(
+    () =>
+      realEnvironmentRequest
+        ? {
+            active: shouldConstrainGaussianViewing(realEnvironmentRequest),
+            camera: selectedEnvironmentCamera,
+            manifold: environmentCameraManifold,
+            alignment: realEnvironmentRequest.manifest.alignment,
+          }
+        : undefined,
+    [
+      environmentCameraManifold,
+      realEnvironmentRequest,
+      selectedEnvironmentCamera,
+    ],
+  );
+
+  const resetSceneCamera = () => {
+    if (environmentCameraManifold) {
+      setEnvironmentCameraIndex(
+        resetSupportedCameraIndex(environmentCameraManifold),
+      );
+    }
+    viewer.resetCamera();
+  };
+
+  const requestEnvironmentDiagnosticSource = useCallback(
+    (source: IntegratedEnvironmentSource) => {
+      setEnvironmentPerformanceMetrics(null);
+      setEnvironmentDiagnosticSelection((current) => ({
+        source,
+        requestedAt: performance.now(),
+        switchToken: current.switchToken + 1,
+      }));
+    },
+    [],
+  );
+
+  const selectEnvironmentDiagnosticSource = useCallback(
+    (source: IntegratedEnvironmentSource) => {
+      sourceSwitchCycleRef.current = { running: false, sequenceIndex: 0 };
+      setSourceSwitchCycle(sourceSwitchCycleRef.current);
+      requestEnvironmentDiagnosticSource(source);
+    },
+    [requestEnvironmentDiagnosticSource],
+  );
+
+  const handleEnvironmentPerformanceMetrics = useCallback(
+    (metrics: IntegratedEnvironmentPerformanceMetrics | null) => {
+      setEnvironmentPerformanceMetrics(metrics);
+      const cycle = sourceSwitchCycleRef.current;
+      if (
+        !metrics ||
+        !cycle.running ||
+        metrics.source !==
+          INTEGRATED_SOURCE_SWITCH_CYCLE[cycle.sequenceIndex] ||
+        metrics.stabilizedFrameCount < SOURCE_SWITCH_STABILIZED_FRAME_TARGET
+      ) {
+        return;
+      }
+      if (
+        cycle.sequenceIndex ===
+        INTEGRATED_SOURCE_SWITCH_CYCLE.length - 1
+      ) {
+        sourceSwitchCycleRef.current = {
+          running: false,
+          sequenceIndex: cycle.sequenceIndex,
+        };
+        setSourceSwitchCycle(sourceSwitchCycleRef.current);
+        return;
+      }
+      const next = {
+        running: true,
+        sequenceIndex: cycle.sequenceIndex + 1,
+      };
+      sourceSwitchCycleRef.current = next;
+      setSourceSwitchCycle(next);
+      requestEnvironmentDiagnosticSource(
+        INTEGRATED_SOURCE_SWITCH_CYCLE[next.sequenceIndex],
+      );
+    },
+    [requestEnvironmentDiagnosticSource],
+  );
+
+  const runEnvironmentSourceSwitchCycle = useCallback(() => {
+    setEnvironmentLifecycleEvents([
+      {
+        switchId: 0,
+        fromSource: "current",
+        toSource: "current",
+        stage: "steady-state",
+        elapsedMilliseconds: 0,
+        rendererInfo: environmentPerformanceMetrics?.rendererInfo ?? null,
+      },
+    ]);
+    const next = { running: true, sequenceIndex: 1 };
+    sourceSwitchCycleRef.current = next;
+    setSourceSwitchCycle(next);
+    requestEnvironmentDiagnosticSource(INTEGRATED_SOURCE_SWITCH_CYCLE[1]);
+  }, [environmentPerformanceMetrics, requestEnvironmentDiagnosticSource]);
 
   useEffect(() => {
     if (atlas.status === "ready" && viewer.spacing === 0.8) {
@@ -376,9 +619,47 @@ export function AtlasViewer() {
             onEnvironmentPhase={localEnvironment.onRendererPhase}
             onEnvironmentError={localEnvironment.onRendererError}
             onWebGl2Support={localEnvironment.setWebGl2Supported}
+            integratedEnvironmentSource={
+              environmentDiagnosticEnabled
+                ? environmentDiagnosticSelection.source
+                : "current"
+            }
+            environmentReadyRequestedAt={
+              Math.max(
+                localEnvironment.loadRequestedAt ?? 0,
+                environmentDiagnosticSelection.requestedAt,
+              ) || null
+            }
+            onEnvironmentPerformanceMetrics={
+              environmentDiagnosticEnabled
+                ? handleEnvironmentPerformanceMetrics
+                : undefined
+            }
+            environmentSourceSwitchToken={
+              environmentDiagnosticSelection.switchToken
+            }
+            onEnvironmentResourceLifecycleEvent={
+              environmentDiagnosticEnabled
+                ? (event) =>
+                    setEnvironmentLifecycleEvents((current) => [
+                      ...current,
+                      event,
+                    ])
+                : undefined
+            }
+            gaussianViewingConstraint={gaussianViewingConstraint}
+            onGaussianViewingTelemetry={
+              viewingConstraintDebugEnabled
+                ? setEnvironmentCameraTelemetry
+                : undefined
+            }
           />
           <div className="scene-badge"><span className="live-dot" aria-hidden="true" />Canonical shared world</div>
-          <p className="scene-help">Click a voxel to query · Drag to orbit · Scroll to zoom</p>
+          <p className="scene-help">
+            {realEnvironmentRequest?.visible
+              ? "Click a voxel to query · Use captured-view controls to inspect the environment"
+              : "Click a voxel to query · Drag to orbit · Scroll to zoom"}
+          </p>
         </section>
         {mediaOpen ? (
         <section
@@ -492,13 +773,148 @@ export function AtlasViewer() {
         </section>
 
         <section className="control-section" aria-labelledby="scene-heading">
-          <div className="section-title-row"><h2 id="scene-heading">Scene</h2><button className="compact-button" type="button" onClick={viewer.resetCamera}>Reset camera</button></div>
+          <div className="section-title-row"><h2 id="scene-heading">Scene</h2><button className="compact-button" type="button" onClick={resetSceneCamera}>Reset camera</button></div>
           <label className="layer-toggle"><input checked={viewer.leftVisible} onChange={() => viewer.toggleArm("left")} type="checkbox" /><span className="arm-dot arm-dot-left" aria-hidden="true" />Left arm entries<strong>{preparedArms[0].visits.length.toLocaleString()}</strong></label>
           <label className="layer-toggle"><input checked={viewer.rightVisible} onChange={() => viewer.toggleArm("right")} type="checkbox" /><span className="arm-dot arm-dot-right" aria-hidden="true" />Right arm entries<strong>{preparedArms[1].visits.length.toLocaleString()}</strong></label>
-          <label className="layer-toggle simple-toggle"><input checked={viewer.autoRotate} onChange={(event) => viewer.setAutoRotate(event.target.checked)} type="checkbox" />Auto rotate</label>
+          <label className="layer-toggle simple-toggle"><input checked={viewer.autoRotate} disabled={Boolean(realEnvironmentRequest?.visible)} onChange={(event) => viewer.setAutoRotate(event.target.checked)} type="checkbox" />Auto rotate</label>
+          {realEnvironmentRequest?.visible ? (
+            <div
+              aria-labelledby="supported-captured-views-heading"
+              className="captured-view-controls"
+              role="group"
+            >
+              <strong id="supported-captured-views-heading">
+                Supported captured views
+              </strong>
+              <p>
+                Free orbit is paused while the Gaussian environment is visible.
+                Navigate the reviewed dominant capture path instead.
+              </p>
+              {currentEnvironmentCameraState.status === "idle" ||
+              currentEnvironmentCameraState.status === "loading" ? (
+                <small role="status">
+                  Loading 205-view camera support; using the known-good fallback
+                  view.
+                </small>
+              ) : null}
+              {currentEnvironmentCameraState.status === "error" ? (
+                <small role="alert">
+                  Camera support unavailable: {currentEnvironmentCameraState.message}.
+                  The known-good fallback view remains locked.
+                </small>
+              ) : null}
+              {environmentCameraManifold ? (
+                <>
+                  <div className="captured-view-actions">
+                    <button
+                      className="compact-button"
+                      disabled={
+                        !realEnvironmentRequest.visible ||
+                        environmentCameraIndex <= 0
+                      }
+                      onClick={() =>
+                        setEnvironmentCameraIndex((current) =>
+                          clampSupportedCameraIndex(
+                            current - 1,
+                            environmentCameraManifold,
+                          ),
+                        )
+                      }
+                      type="button"
+                    >
+                      Previous view
+                    </button>
+                    <button
+                      className="compact-button"
+                      disabled={
+                        !realEnvironmentRequest.visible ||
+                        environmentCameraIndex >=
+                          environmentCameraManifold.cameras.length - 1
+                      }
+                      onClick={() =>
+                        setEnvironmentCameraIndex((current) =>
+                          clampSupportedCameraIndex(
+                            current + 1,
+                            environmentCameraManifold,
+                          ),
+                        )
+                      }
+                      type="button"
+                    >
+                      Next view
+                    </button>
+                    <button
+                      className="compact-button"
+                      disabled={!realEnvironmentRequest.visible}
+                      onClick={resetSceneCamera}
+                      type="button"
+                    >
+                      Reset camera
+                    </button>
+                  </div>
+                  <label htmlFor="supported-environment-view">
+                    Captured view {environmentCameraIndex + 1} of{" "}
+                    {environmentCameraManifold.cameras.length}
+                  </label>
+                  <input
+                    aria-label="Supported captured environment view"
+                    disabled={!realEnvironmentRequest.visible}
+                    id="supported-environment-view"
+                    max={environmentCameraManifold.cameras.length - 1}
+                    min={0}
+                    onChange={(event) =>
+                      setEnvironmentCameraIndex(
+                        clampSupportedCameraIndex(
+                          Number(event.target.value),
+                          environmentCameraManifold,
+                        ),
+                      )
+                    }
+                    step={1}
+                    type="range"
+                    value={environmentCameraIndex}
+                  />
+                  <small>
+                    View {selectedEnvironmentCamera.sourceImage}; detached
+                    five-camera subgroup excluded.
+                  </small>
+                </>
+              ) : null}
+              {viewingConstraintDebugEnabled && environmentCameraTelemetry ? (
+                <output className="captured-view-debug">
+                  Reconstruction-space camera: {environmentCameraTelemetry.cameraPosition
+                    .map((value) => value.toFixed(4))
+                    .join(", ")}
+                  <br />
+                  Nearest: COLMAP {environmentCameraTelemetry.nearestColmapImageId} /{" "}
+                  {environmentCameraTelemetry.nearestSourceImage}
+                  <br />
+                  Support distance: {environmentCameraTelemetry.distance.toFixed(6)};
+                  orientation Δ {environmentCameraTelemetry.orientationDifferenceDegrees.toFixed(3)}°;{" "}
+                  {environmentCameraTelemetry.inside ? "inside" : "outside"}
+                </output>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
-        <EnvironmentStatus capability={demoEnvironmentCapability} local={localEnvironment} />
+        <EnvironmentStatus
+          capability={demoEnvironmentCapability}
+          local={localEnvironment}
+          diagnostic={{
+            enabled: environmentDiagnosticEnabled,
+            source: environmentDiagnosticSelection.source,
+            metrics: environmentPerformanceMetrics,
+            lifecycleEvents: environmentLifecycleEvents,
+            cycle: sourceSwitchCycle,
+            canRunCycle:
+              localEnvironment.request !== null &&
+              environmentPerformanceMetrics?.source === "current" &&
+              environmentPerformanceMetrics.stabilizedFrameCount >= 120,
+            onSourceChange: selectEnvironmentDiagnosticSource,
+            onRunCycle: runEnvironmentSourceSwitchCycle,
+          }}
+        />
 
         <section className="control-section robot-setup" aria-labelledby="robot-setup-heading">
           <div className="section-title-row"><h2 id="robot-setup-heading">Robot setup</h2><span>Provisional geometry</span></div>

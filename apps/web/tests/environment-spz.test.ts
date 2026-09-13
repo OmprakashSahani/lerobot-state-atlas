@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import { inspectSpzHeader } from "@/lib/environment/spz-header";
+import { MAX_ENVIRONMENT_SPLATS } from "@/lib/environment/limits";
 // The generator is intentionally JavaScript so it can run without a build step.
 // @ts-expect-error no declaration file is needed for this repository-owned script
 import { EXPECTED_SHA256, EXPECTED_SPLAT_COUNT, generateSyntheticSpz } from "@/scripts/generate-synthetic-spz.mjs";
@@ -33,13 +34,29 @@ describe("SPZ v3 spike preflight", () => {
   it.each([
     ["magic", (view: DataView) => view.setUint32(0, 0, true), /magic/],
     ["zero count", (view: DataView) => view.setUint32(8, 0, true), /count/],
-    ["excessive count", (view: DataView) => view.setUint32(8, 100001, true), /count/],
+    ["excessive count", (view: DataView) => view.setUint32(8, 250001, true), /count/],
     ["SH degree", (view: DataView) => view.setUint8(12, 1), /degree 0/],
     ["fractional bits", (view: DataView) => view.setUint8(13, 17), /fractionalBits/],
     ["unknown flags", (view: DataView) => view.setUint8(14, 0x80), /flags/],
     ["reserved", (view: DataView) => view.setUint8(15, 1), /reserved/],
   ] as const)("rejects invalid %s", async (_label, mutate, message) => {
     await expect(inspectSpzHeader(fixtureHeader(mutate), 4)).rejects.toThrow(message);
+  });
+
+  it("accepts the reviewed 250k cap and rejects the next splat", async () => {
+    const atCap = fixtureHeader((view) =>
+      view.setUint32(8, MAX_ENVIRONMENT_SPLATS, true),
+    );
+    await expect(
+      inspectSpzHeader(atCap, MAX_ENVIRONMENT_SPLATS),
+    ).resolves.toMatchObject({ splatCount: 250_000 });
+
+    const overCap = fixtureHeader((view) =>
+      view.setUint32(8, MAX_ENVIRONMENT_SPLATS + 1, true),
+    );
+    await expect(
+      inspectSpzHeader(overCap, MAX_ENVIRONMENT_SPLATS + 1),
+    ).rejects.toThrow(/count/);
   });
 
   it("rejects count mismatch, malformed gzip, and truncated header", async () => {

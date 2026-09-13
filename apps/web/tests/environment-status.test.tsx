@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { EnvironmentStatus } from "@/components/viewer/EnvironmentStatus";
@@ -9,6 +9,7 @@ function local(phase: LocalEnvironmentController["phase"]): LocalEnvironmentCont
   return {
     phase,
     request: null,
+    loadRequestedAt: null,
     load: vi.fn(), hide: vi.fn(), show: vi.fn(), unload: vi.fn(), retry: vi.fn(),
     onRendererPhase: vi.fn(), onRendererError: vi.fn(), setWebGl2Supported: vi.fn(),
     ...(phase === "error" ? { error: "Synthetic parser rejected the asset." } : {}),
@@ -37,13 +38,64 @@ describe("environment capability status", () => {
 
   it("exposes truthful local idle, error, and mobile refusal states", () => {
     const { rerender } = render(<EnvironmentStatus capability={demoEnvironmentCapability} local={local("idle")} />);
-    expect(screen.getByText("Synthetic test environment — not a real reconstruction")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Load synthetic environment" })).toBeEnabled();
+    expect(screen.getByText("Local environment configured")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Load environment" })).toBeEnabled();
     rerender(<EnvironmentStatus capability={demoEnvironmentCapability} local={local("error")} />);
     expect(screen.getByRole("alert")).toHaveTextContent("parser rejected");
     expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
     rerender(<EnvironmentStatus capability={demoEnvironmentCapability} local={local("mobile-refusal")} />);
     expect(screen.getByText(/intentionally disabled on mobile/i)).toBeVisible();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("keeps the integrated source control explicitly gated and render-only", () => {
+    const controller = local("idle");
+    const onSourceChange = vi.fn();
+    const { rerender } = render(
+      <EnvironmentStatus
+        capability={demoEnvironmentCapability}
+        local={controller}
+        diagnostic={{
+          enabled: false,
+          source: "current",
+          metrics: null,
+          lifecycleEvents: [],
+          cycle: { running: false, sequenceIndex: 0 },
+          canRunCycle: false,
+          onSourceChange,
+          onRunCycle: vi.fn(),
+        }}
+      />,
+    );
+    expect(
+      screen.queryByLabelText("Development performance source"),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <EnvironmentStatus
+        capability={demoEnvironmentCapability}
+        local={controller}
+        diagnostic={{
+          enabled: true,
+          source: "current",
+          metrics: null,
+          lifecycleEvents: [],
+          cycle: { running: false, sequenceIndex: 0 },
+          canRunCycle: false,
+          onSourceChange,
+          onRunCycle: vi.fn(),
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Development performance source"), {
+      target: { value: "uniform250k" },
+    });
+    expect(onSourceChange).toHaveBeenCalledWith("uniform250k");
+    fireEvent.change(screen.getByLabelText("Development performance source"), {
+      target: { value: "uniform300k" },
+    });
+    expect(onSourceChange).toHaveBeenCalledWith("uniform300k");
+    expect(controller.request).toBeNull();
+    expect(controller.load).not.toHaveBeenCalled();
   });
 });

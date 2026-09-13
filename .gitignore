@@ -30,6 +30,7 @@ MANIFEST
 
 # Local-only generated Gaussian Splat compatibility fixture
 apps/web/public/environment-data/__local-synthetic__/
+apps/web/public/environment-data/__local-real__/
 
 # PyInstaller
 #   Usually these files are written by a python script from a template

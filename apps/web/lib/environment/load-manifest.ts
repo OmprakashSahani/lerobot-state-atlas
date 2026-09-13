@@ -1,6 +1,11 @@
 import type { AvailableEnvironmentManifest } from "./types";
 import { decodeEnvironmentManifest } from "./validate";
-import { MAX_ENVIRONMENT_MANIFEST_BYTES, MAX_ENVIRONMENT_ASSET_BYTES, MAX_ENVIRONMENT_SPLATS } from "./limits";
+import {
+  LOCAL_REAL_ENVIRONMENT_ROOT,
+  MAX_ENVIRONMENT_MANIFEST_BYTES,
+  MAX_ENVIRONMENT_ASSET_BYTES,
+  MAX_ENVIRONMENT_SPLATS,
+} from "./limits";
 import { assertSafeFinalResponseUrl, resolveLocalAssetPath, validateLocalManifestPath } from "./path-safety";
 
 export class EnvironmentLoadError extends Error {
@@ -71,9 +76,30 @@ export async function loadLocalEnvironmentManifest(
     throw new EnvironmentLoadError("Environment manifest is not valid UTF-8 JSON.");
   }
   const manifest = decodeEnvironmentManifest(value);
-  if (manifest.status !== "available") throw new EnvironmentLoadError("Local synthetic environment is not available.");
-  if (manifest.provenance.sourceKind !== "synthetic-test" || manifest.provenance.reconstructionClaim !== false) {
-    throw new EnvironmentLoadError("Local environment must have truthful synthetic provenance.");
+  if (manifest.status !== "available") {
+    throw new EnvironmentLoadError("Local environment is not available.");
+  }
+
+  const expectedSourceKind = path.startsWith(LOCAL_REAL_ENVIRONMENT_ROOT)
+    ? "real-scan"
+    : "synthetic-test";
+
+  if (
+    manifest.provenance.sourceKind !== expectedSourceKind ||
+    manifest.provenance.reconstructionClaim !== false
+  ) {
+    throw new EnvironmentLoadError(
+      `Local environment provenance does not match the approved ${expectedSourceKind} root.`,
+    );
+  }
+
+  if (
+    expectedSourceKind === "real-scan" &&
+    manifest.alignment.calibrated !== false
+  ) {
+    throw new EnvironmentLoadError(
+      "Local real-scan environment must remain explicitly uncalibrated.",
+    );
   }
   if (manifest.asset.byteSize > MAX_ENVIRONMENT_ASSET_BYTES || manifest.asset.splatCount > MAX_ENVIRONMENT_SPLATS) {
     throw new EnvironmentLoadError("Local environment exceeds spike limits.");
