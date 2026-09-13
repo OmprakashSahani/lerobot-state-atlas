@@ -1,9 +1,10 @@
 export const LOCAL_ENVIRONMENT_ROOT = "/environment-data/__local-synthetic__/";
+export const LOCAL_REAL_ENVIRONMENT_ROOT = "/environment-data/__local-real__/";
 export const LOCAL_ENVIRONMENT_MANIFEST_ENV =
   "NEXT_PUBLIC_LOCAL_ENVIRONMENT_MANIFEST";
 export const MAX_ENVIRONMENT_MANIFEST_BYTES = 64 * 1024;
 export const MAX_ENVIRONMENT_ASSET_BYTES = 8 * 1024 * 1024;
-export const MAX_ENVIRONMENT_SPLATS = 100_000;
+export const MAX_ENVIRONMENT_SPLATS = 250_000;
 export const SPZ_HEADER_BYTES = 16;
 export const MAX_SPZ_HEADER_OUTPUT_BYTES = 64 * 1024;
 export const SPZ_MAGIC = 0x5053474e;

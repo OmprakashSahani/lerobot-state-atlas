@@ -27,6 +27,7 @@ export type LocalEnvironmentPhase =
 export interface LocalEnvironmentController {
   phase: LocalEnvironmentPhase;
   request: ValidatedEnvironmentRenderRequest | null;
+  loadRequestedAt: number | null;
   error?: string;
   disclosure?: string;
   load(): void;
@@ -51,6 +52,7 @@ export function useLocalEnvironmentSpike(): LocalEnvironmentController {
   );
   const [request, setRequest] = useState<ValidatedEnvironmentRenderRequest | null>(null);
   const [error, setError] = useState<string>();
+  const [loadRequestedAt, setLoadRequestedAt] = useState<number | null>(null);
   const generation = useRef(0);
   const abortController = useRef<AbortController | null>(null);
   const active = useRef(false);
@@ -76,6 +78,7 @@ export function useLocalEnvironmentSpike(): LocalEnvironmentController {
     active.current = false;
     setPhase("unloading");
     setRequest(null);
+    setLoadRequestedAt(null);
     setError(undefined);
     queueMicrotask(() => {
       if (mounted.current) setPhase(configuration.status === "available" ? "idle" : "unavailable");
@@ -89,6 +92,7 @@ export function useLocalEnvironmentSpike(): LocalEnvironmentController {
       return;
     }
     const current = ++generation.current;
+    setLoadRequestedAt(performance.now());
     active.current = true;
     setRequest(null);
     setError(undefined);
@@ -148,6 +152,7 @@ export function useLocalEnvironmentSpike(): LocalEnvironmentController {
   return {
     phase: effectivePhase,
     request,
+    loadRequestedAt,
     error,
     disclosure: request?.manifest.alignment.disclosure,
     load,

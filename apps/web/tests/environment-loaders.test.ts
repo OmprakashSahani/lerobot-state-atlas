@@ -4,9 +4,11 @@ import syntheticManifest from "@/tests/fixtures/environment/synthetic-v1/manifes
 import { loadVerifiedEnvironmentAsset, sha256Hex } from "@/lib/environment/load-asset";
 import { loadLocalEnvironmentManifest, readResponseBytes } from "@/lib/environment/load-manifest";
 import { decodeEnvironmentManifest } from "@/lib/environment/validate";
+import { MAX_ENVIRONMENT_SPLATS } from "@/lib/environment/limits";
 
 const origin = "https://atlas.test";
 const manifestPath = "/environment-data/__local-synthetic__/manifest.json";
+const realManifestPath = "/environment-data/__local-real__/manifest.json";
 
 function response(body: BodyInit, options: ResponseInit & { url?: string; redirected?: boolean } = {}) {
   const result = new Response(body, options);
@@ -24,6 +26,121 @@ describe("local environment manifest loading", () => {
     expect(loaded.manifest.provenance.sourceKind).toBe("synthetic-test");
     expect(loaded.assetPath).toMatch(/synthetic-contract-test\.spz$/);
     expect(fetcher).toHaveBeenCalledWith(new URL(`${origin}${manifestPath}`), expect.objectContaining({ redirect: "error" }));
+  });
+
+  it("loads a bounded same-origin uncalibrated real-scan manifest from the real root", async () => {
+    const realManifest = structuredClone(syntheticManifest);
+    realManifest.environmentId = "omprakash-workcell";
+    realManifest.label = "Omprakash workcell — uncalibrated real scan";
+    realManifest.provenance = {
+      sourceKind: "real-scan",
+      description: "Real Gaussian Splat reconstruction from the Omprakash workcell capture.",
+      reconstructionClaim: false,
+    };
+    realManifest.alignment.calibrated = false;
+    realManifest.alignment.disclosure =
+      "Real reconstruction only. Alignment to canonical robot-world coordinates has not yet been calibrated.";
+
+    const fetcher = vi.fn(async () =>
+      response(JSON.stringify(realManifest), {
+        url: `${origin}${realManifestPath}`,
+      }),
+    ) as unknown as typeof fetch;
+
+    const loaded = await loadLocalEnvironmentManifest(
+      realManifestPath,
+      origin,
+      new AbortController().signal,
+      fetcher,
+    );
+
+    expect(loaded.manifest.provenance.sourceKind).toBe("real-scan");
+    expect(loaded.manifest.provenance.reconstructionClaim).toBe(false);
+    expect(loaded.manifest.alignment.calibrated).toBe(false);
+  });
+
+  it("accepts the reviewed 250k manifest cap and rejects only counts above it", async () => {
+    const realManifest = structuredClone(syntheticManifest);
+    realManifest.provenance = {
+      sourceKind: "real-scan",
+      description: "Uncalibrated real-scan limit fixture.",
+      reconstructionClaim: false,
+    };
+    realManifest.alignment.calibrated = false;
+    realManifest.asset.splatCount = MAX_ENVIRONMENT_SPLATS;
+
+    const fetchAtCap = vi.fn(async () =>
+      response(JSON.stringify(realManifest), {
+        url: `${origin}${realManifestPath}`,
+      }),
+    ) as unknown as typeof fetch;
+    await expect(
+      loadLocalEnvironmentManifest(
+        realManifestPath,
+        origin,
+        new AbortController().signal,
+        fetchAtCap,
+      ),
+    ).resolves.toMatchObject({
+      manifest: { asset: { splatCount: 250_000 } },
+    });
+
+    realManifest.asset.splatCount = MAX_ENVIRONMENT_SPLATS + 1;
+    const fetchOverCap = vi.fn(async () =>
+      response(JSON.stringify(realManifest), {
+        url: `${origin}${realManifestPath}`,
+      }),
+    ) as unknown as typeof fetch;
+    await expect(
+      loadLocalEnvironmentManifest(
+        realManifestPath,
+        origin,
+        new AbortController().signal,
+        fetchOverCap,
+      ),
+    ).rejects.toThrow(/spike limits/);
+  });
+
+  it("rejects provenance/root mismatches and calibrated local real scans", async () => {
+    const syntheticInRealRoot = vi.fn(async () =>
+      response(JSON.stringify(syntheticManifest), {
+        url: `${origin}${realManifestPath}`,
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      loadLocalEnvironmentManifest(
+        realManifestPath,
+        origin,
+        new AbortController().signal,
+        syntheticInRealRoot,
+      ),
+    ).rejects.toThrow(/provenance/);
+
+    const realManifest = structuredClone(syntheticManifest);
+    realManifest.environmentId = "omprakash-workcell";
+    realManifest.label = "Omprakash workcell";
+    realManifest.provenance = {
+      sourceKind: "real-scan",
+      description: "Real Gaussian Splat reconstruction.",
+      reconstructionClaim: false,
+    };
+    realManifest.alignment.calibrated = true;
+
+    const calibratedReal = vi.fn(async () =>
+      response(JSON.stringify(realManifest), {
+        url: `${origin}${realManifestPath}`,
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      loadLocalEnvironmentManifest(
+        realManifestPath,
+        origin,
+        new AbortController().signal,
+        calibratedReal,
+      ),
+    ).rejects.toThrow(/uncalibrated/);
   });
 
   it("rejects redirects and final URLs outside the fixed root", async () => {

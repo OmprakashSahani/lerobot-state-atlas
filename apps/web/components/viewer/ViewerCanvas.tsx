@@ -6,7 +6,7 @@
 
 import { Canvas, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { Box3, PerspectiveCamera, Sphere, Vector3 } from "three";
+import { Box3, MathUtils, PerspectiveCamera, Sphere, Vector3 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import type {
@@ -16,6 +16,22 @@ import type {
   TrajectoryEpisodeRecordedGripperValues,
 } from "@/lib/atlas-schema/types";
 import type { ValidatedEnvironmentRenderRequest } from "@/lib/environment/types";
+import type { EnvironmentAlignment } from "@/lib/environment/types";
+import {
+  assessCameraSupport,
+  reconstructionCameraStateFromScene,
+  sceneFromReconstructionMatrix,
+  type SupportedCameraManifold,
+} from "@/lib/environment/camera-viewing-constraint";
+import {
+  applyRegisteredCamera,
+  type ConvertedRegisteredCamera,
+} from "@/lib/environment/camera-manifold";
+import type {
+  IntegratedEnvironmentPerformanceMetrics,
+  IntegratedEnvironmentSource,
+  SparkResourceLifecycleEvent,
+} from "@/lib/environment/integrated-performance-diagnostic";
 
 import { EnvironmentLayer, gridEnvironment } from "./EnvironmentLayer";
 import { SparkEnvironmentAdapter, type SparkAdapterPhase } from "./SparkEnvironmentAdapter";
@@ -23,8 +39,32 @@ import { InteractionLayer } from "./InteractionLayer";
 import { RobotDataLayer } from "./RobotDataLayer";
 import { useViewerStore } from "./ViewerStore";
 
-function CameraController({ data }: { data: AtlasData }) {
-  const { camera, gl } = useThree();
+export interface GaussianViewingConstraint {
+  active: boolean;
+  camera: ConvertedRegisteredCamera;
+  manifold: SupportedCameraManifold | null;
+  alignment: EnvironmentAlignment;
+}
+
+export interface GaussianViewingTelemetry {
+  cameraPosition: [number, number, number];
+  nearestColmapImageId: number;
+  nearestSourceImage: string;
+  distance: number;
+  orientationDifferenceDegrees: number;
+  inside: boolean;
+}
+
+export function CameraController({
+  data,
+  gaussianViewingConstraint,
+  onGaussianViewingTelemetry,
+}: {
+  data: AtlasData;
+  gaussianViewingConstraint?: GaussianViewingConstraint;
+  onGaussianViewingTelemetry?: (telemetry: GaussianViewingTelemetry) => void;
+}) {
+  const { camera, gl, size } = useThree();
   const controls = useRef<OrbitControls | null>(null);
   const { cameraResetToken, autoRotate } = useViewerStore();
   const framing = useMemo(() => {
@@ -37,6 +77,10 @@ function CameraController({ data }: { data: AtlasData }) {
   }, [data.manifest.sceneBounds]);
 
   useEffect(() => {
+    if (gaussianViewingConstraint?.active) {
+      controls.current = null;
+      return;
+    }
     camera.up.set(0, 0, 1);
     const orbit = new OrbitControls(camera, gl.domElement);
     orbit.enableDamping = true;
@@ -57,14 +101,23 @@ function CameraController({ data }: { data: AtlasData }) {
       orbit.dispose();
       controls.current = null;
     };
-  }, [camera, framing.radius, gl.domElement]);
+  }, [
+    camera,
+    framing.radius,
+    gaussianViewingConstraint?.active,
+    gl.domElement,
+  ]);
 
   useEffect(() => {
     if (controls.current) controls.current.autoRotate = autoRotate;
   }, [autoRotate]);
 
   useEffect(() => {
+    if (gaussianViewingConstraint?.active) return;
     const perspective = camera as PerspectiveCamera;
+    perspective.clearViewOffset();
+    perspective.fov = 42;
+    perspective.aspect = size.width / Math.max(1, size.height);
     const distance =
       framing.radius /
       Math.sin((perspective.fov * Math.PI) / 360) *
@@ -79,7 +132,70 @@ function CameraController({ data }: { data: AtlasData }) {
     camera.updateProjectionMatrix();
     controls.current?.target.copy(framing.center);
     controls.current?.update();
-  }, [camera, cameraResetToken, framing]);
+  }, [
+    camera,
+    cameraResetToken,
+    framing,
+    gaussianViewingConstraint?.active,
+    size.height,
+    size.width,
+  ]);
+
+  useEffect(() => {
+    if (
+      !gaussianViewingConstraint?.active ||
+      !(camera instanceof PerspectiveCamera)
+    ) {
+      return;
+    }
+    const { alignment, camera: capturedCamera, manifold } =
+      gaussianViewingConstraint;
+    applyRegisteredCamera(
+      camera,
+      capturedCamera,
+      sceneFromReconstructionMatrix(alignment),
+    );
+    controls.current?.target
+      .copy(camera.position)
+      .add(new Vector3(0, 0, -1).applyQuaternion(camera.quaternion));
+    const reconstructionState = reconstructionCameraStateFromScene(
+      camera.position,
+      new Vector3(0, 0, -1).applyQuaternion(camera.quaternion),
+      alignment,
+    );
+    const assessment = manifold
+      ? assessCameraSupport(
+          reconstructionState.position,
+          reconstructionState.viewingDirection,
+          manifold,
+        )
+      : {
+          inside: true,
+          nearestCamera: capturedCamera,
+          distance: reconstructionState.position.distanceTo(
+            capturedCamera.center,
+          ),
+          orientationDifferenceRadians:
+            reconstructionState.viewingDirection.angleTo(
+              capturedCamera.viewingDirection,
+            ),
+        };
+    onGaussianViewingTelemetry?.({
+      cameraPosition: reconstructionState.position.toArray(),
+      nearestColmapImageId: assessment.nearestCamera.colmapImageId,
+      nearestSourceImage: assessment.nearestCamera.sourceImage,
+      distance: assessment.distance,
+      orientationDifferenceDegrees: MathUtils.radToDeg(
+        assessment.orientationDifferenceRadians,
+      ),
+      inside: assessment.inside,
+    });
+  }, [
+    camera,
+    cameraResetToken,
+    gaussianViewingConstraint,
+    onGaussianViewingTelemetry,
+  ]);
   return null;
 }
 
@@ -93,6 +209,13 @@ export function ViewerCanvas({
   onEnvironmentPhase,
   onEnvironmentError,
   onWebGl2Support,
+  integratedEnvironmentSource,
+  environmentReadyRequestedAt,
+  onEnvironmentPerformanceMetrics,
+  environmentSourceSwitchToken,
+  onEnvironmentResourceLifecycleEvent,
+  gaussianViewingConstraint,
+  onGaussianViewingTelemetry,
 }: {
   data: AtlasData;
   episode: TrajectoryEpisode | null;
@@ -103,6 +226,17 @@ export function ViewerCanvas({
   onEnvironmentPhase: (generation: number, phase: SparkAdapterPhase) => void;
   onEnvironmentError: (generation: number, message: string) => void;
   onWebGl2Support: (supported: boolean) => void;
+  integratedEnvironmentSource?: IntegratedEnvironmentSource;
+  environmentReadyRequestedAt?: number | null;
+  onEnvironmentPerformanceMetrics?: (
+    metrics: IntegratedEnvironmentPerformanceMetrics | null,
+  ) => void;
+  environmentSourceSwitchToken?: number;
+  onEnvironmentResourceLifecycleEvent?: (
+    event: SparkResourceLifecycleEvent,
+  ) => void;
+  gaussianViewingConstraint?: GaussianViewingConstraint;
+  onGaussianViewingTelemetry?: (telemetry: GaussianViewingTelemetry) => void;
 }) {
   return (
     <Canvas
@@ -126,6 +260,11 @@ export function ViewerCanvas({
         request={environmentRequest}
         onPhase={onEnvironmentPhase}
         onError={onEnvironmentError}
+        integratedSource={integratedEnvironmentSource}
+        readyRequestedAt={environmentReadyRequestedAt}
+        onPerformanceMetrics={onEnvironmentPerformanceMetrics}
+        sourceSwitchToken={environmentSourceSwitchToken}
+        onResourceLifecycleEvent={onEnvironmentResourceLifecycleEvent}
       />
       <RobotDataLayer data={data} />
       <InteractionLayer
@@ -135,7 +274,11 @@ export function ViewerCanvas({
         recordedGripperEpisode={recordedGripperEpisode}
         playbackFrame={playbackFrame}
       />
-      <CameraController data={data} />
+      <CameraController
+        data={data}
+        gaussianViewingConstraint={gaussianViewingConstraint}
+        onGaussianViewingTelemetry={onGaussianViewingTelemetry}
+      />
     </Canvas>
   );
 }

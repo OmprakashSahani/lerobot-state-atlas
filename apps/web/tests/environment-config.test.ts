@@ -4,6 +4,7 @@ import { isConservativeSpikeMobile, resolveLocalEnvironmentConfiguration } from 
 import { resolveLocalAssetPath, validateLocalManifestPath } from "@/lib/environment/path-safety";
 
 const approved = "/environment-data/__local-synthetic__/manifest.json";
+const realApproved = "/environment-data/__local-real__/manifest.json";
 
 describe("local environment capability configuration", () => {
   it("is always unavailable in production", () => {
@@ -13,6 +14,7 @@ describe("local environment capability configuration", () => {
   it("requires an explicitly approved development path", () => {
     expect(resolveLocalEnvironmentConfiguration("development", undefined).status).toBe("unavailable");
     expect(resolveLocalEnvironmentConfiguration("development", approved)).toEqual({ status: "available", manifestPath: approved });
+    expect(resolveLocalEnvironmentConfiguration("development", realApproved)).toEqual({ status: "available", manifestPath: realApproved });
   });
 
   it.each([
@@ -32,6 +34,7 @@ describe("local environment capability configuration", () => {
 
   it("resolves only a safe single-segment SPZ beside the manifest", () => {
     expect(resolveLocalAssetPath(approved, "synthetic-environment.spz")).toBe("/environment-data/__local-synthetic__/synthetic-environment.spz");
+    expect(resolveLocalAssetPath(realApproved, "omprakash-workcell.spz")).toBe("/environment-data/__local-real__/omprakash-workcell.spz");
     expect(() => resolveLocalAssetPath(approved, "../escape.spz")).toThrow();
     expect(() => resolveLocalAssetPath(approved, "nested/scene.spz")).toThrow();
   });
